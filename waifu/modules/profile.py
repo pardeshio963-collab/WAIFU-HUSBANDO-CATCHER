@@ -107,9 +107,9 @@ async def profile(update: Update, context: CallbackContext) -> None:
     if fav_id:
         fav_char = next((c for c in chars if c["id"] == fav_id), None)
         photo    = (fav_char or {}).get("img_url")
-    if not photo:
+        if not photo:
     photo = "https://files.catbox.moe/lly67s.jpg"
-
+    
     if photo:
         await update.message.reply_photo(
             photo, caption=text, parse_mode=ParseMode.HTML)
