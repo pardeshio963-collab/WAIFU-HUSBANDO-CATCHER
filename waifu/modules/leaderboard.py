@@ -39,7 +39,7 @@ async def leaderboard(update: Update, context: CallbackContext) -> None:
     for i, u in enumerate(data):
         lnk = _link(u.get("first_name") or "?", u.get("username"), u.get("id", 0))
         lines.append(f"{_medal(i)} {lnk} ➾ <b>{u.get('character_count',0)}</b>")
-    photo = random.choice(PHOTO_URL) if PHOTO_URL else None
+    photo = "https://files.catbox.moe/imj4fh.jpg"
     if photo:
         await update.message.reply_photo(photo, caption="\n".join(lines), parse_mode=ParseMode.HTML)
     else:
@@ -59,7 +59,7 @@ async def ctop(update: Update, context: CallbackContext) -> None:
     for i, u in enumerate(data):
         lnk = _link(u.get("first_name") or "?", u.get("username"), u.get("user_id", 0))
         lines.append(f"{_medal(i)} {lnk} ➾ <b>{u.get('character_count',0)}</b>")
-    photo = random.choice(PHOTO_URL) if PHOTO_URL else None
+    photo = "https://files.catbox.moe/imj4fh.jpg"
     if photo:
         await update.message.reply_photo(photo, caption="\n".join(lines), parse_mode=ParseMode.HTML)
     else:
@@ -77,7 +77,7 @@ async def global_leaderboard(update: Update, context: CallbackContext) -> None:
     for i, g in enumerate(data):
         name  = html.escape((g.get("group_name") or "Unknown")[:_T])
         lines.append(f"{_medal(i)} <b>{name}</b> ➾ <b>{g.get('count',0)}</b>")
-    photo = random.choice(PHOTO_URL) if PHOTO_URL else None
+    photo = "https://files.catbox.moe/imj4fh.jpg"
     if photo:
         await update.message.reply_photo(photo, caption="\n".join(lines), parse_mode=ParseMode.HTML)
     else:
