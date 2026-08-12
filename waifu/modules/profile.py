@@ -102,24 +102,20 @@ async def profile(update: Update, context: CallbackContext) -> None:
         f"<b>Rarity breakdown:</b>\n{rarity_lines}"
     )
 
-    # Show favourite character image if available
-photo: str | None = None
+        # Show favourite character image if available
+    photo: str | None = None
+    if fav_id:
+        fav_char = next((c for c in chars if c["id"] == fav_id), None)
+        photo    = (fav_char or {}).get("img_url")
+    if not photo and PHOTO_URL:
+        photo = random.choice(PHOTO_URL)
 
-if fav_id:
-    fav_char = next((c for c in chars if c["id"] == fav_id), None)
-    photo = random.choice(PHOTO_URL)
-
-if not photo:
-    photo = "https://files.catbox.moe/lly67s.jpg"
-
-if photo:
-    await update.message.reply_photo(
-        photo, caption=text, parse_mode=ParseMode.HTML
-    )
-else:
-    await update.message.reply_text(
-        text, parse_mode=ParseMode.HTML
-    )
+    if photo:
+        await update.message.reply_photo(
+            photo, caption=text, parse_mode=ParseMode.HTML)
+    else:
+        await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+        
 
 
 application.add_handler(CommandHandler("profile", profile, block=False))
