@@ -73,7 +73,7 @@ async def start(update: Update, context: CallbackContext) -> None:
         if patch:
             await _pm.update_one({"_id": u.id}, {"$set": patch})
 
-    photo = random.choice(PHOTO_URL) if PHOTO_URL else None
+    photo = "https://files.catbox.moe/35pe63.jpg" 
     caption = WELCOME if update.effective_chat.type == "private" else "🎴 I'm alive! DM me for info."
 
     if photo:
