@@ -38,15 +38,43 @@ class Config:
     DUEL_WIN_COINS:  int = 150
     DUEL_LOSE_COINS: int = 30
 
-    # Rarity map (used by both upload paths)
+    # Rarity map
     RARITY_MAP: dict[int, str] = {
-        1: "⚪ Common",
+        1: "⚪ Legendary",
         2: "🟣 Rare",
-        3: "🟡 Legendary",
-        4: "🟢 Medium",
-        5: "💮 Special Edition",
+        3: "💮 Special",
+        4: "🔵 Limited",
+        5: "🔴 Exclusive",
+        6: "🌌 Celestial",
+        7: "🟠 Mythic",
+        8: "💎 Luxury Edition",
+    }
+
+    # Edition map
+    EDITION_MAP: dict[int, str] = {
+        1: "🎃 Halloween",
+        2: "💕 Valentine",
+        3: "🩺 Doctor",
+        4: "🐞 Bug",
+        5: "🧘 Monk",
+        6: "🏀 Basketball",
+        7: "👶 Chibi",
+        8: "👘 Kimono",
+        9: "☕ Coffee",
+        10: "🌈 Holi",
+        11: "🧜 Mermaid",
+        12: "🥻 Saree",
+        13: "🫥 Abses",
+        14: "🎀 Maid",
+        15: "🎵 Music",
+        16: "❄️ Winter",
+        17: "🪔 Diwali",
+        18: "🎮 Game",
+        19: "🎄 Xmas",
+        20: "☀️ Summer",
     }
 
     @classmethod
     def all_sudo(cls) -> set[int]:
         return {cls.OWNER_ID, *cls.sudo_users}
+        
