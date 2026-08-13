@@ -28,7 +28,9 @@ from waifu import application, collection, db, sudo_users, OWNER_ID, CHARA_CHANN
 from waifu.config import Config
 
 RARITY_MAP  = Config.RARITY_MAP
-RARITY_STRS = {v.lower(): v for v in RARITY_MAP.values()}  # e.g. "legendary" → "🟡 Legendary"
+EDITION_MAP = Config.EDITION_MAP
+RARITY_STRS = {v.lower(): v for v in RARITY_MAP.values()}
+EDITION_STRS = {v.lower(): v for v in EDITION_MAP.values()}
 
 WRONG_FORMAT = (
     "❌ Wrong format\n\n"
@@ -65,6 +67,7 @@ def _char_caption(char: dict, uploader_id: int, uploader_name: str) -> str:
     return (
         f"🍀 <b>Name:</b> {char['name']}\n"
         f"🍋 <b>Rarity:</b> {char['rarity']}\n"
+        f"🎀 <b>Edition:</b> {char.get('edition', 'None')}\n"
         f"🌸 <b>Anime:</b> {char['anime']}\n"
         f"🌱 <b>ID:</b> {char['id']}\n\n"
         f"Added by <a href='tg://user?id={uploader_id}'>{uploader_name}</a>"
@@ -79,39 +82,82 @@ async def upload(update: Update, context: CallbackContext) -> None:
         return
 
     if len(context.args) != 4:
-        await update.message.reply_text(WRONG_FORMAT, parse_mode=ParseMode.HTML)
+        await update.message.reply_text(
+            "❌ Wrong format\n\n"
+            "<code>/upload name anime rarity edition</code>\n\n"
+            "<b>Rarities:</b>\n"
+            + "\n".join(f"  {k} → {v}" for k, v in RARITY_MAP.items())
+            + "\n\n<b>Editions:</b>\n"
+            + "\n".join(f"  {k} → {v}" for k, v in EDITION_MAP.items())
+            + "\n\n<i>Reply to the character image when using /upload.</i>",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
-    img_url, raw_name, raw_anime, raw_rarity = context.args
-
-    if not await _validate_url(img_url):
-        await update.message.reply_text("❌ Image URL is invalid or unreachable.")
+    replied = update.message.reply_to_message
+    if not replied:
+        await update.message.reply_text("❌ Reply to the character image with /upload.")
         return
+
+    photo = None
+    if replied.photo:
+        photo = replied.photo[-1].file_id
+    elif replied.document and (replied.document.mime_type or "").startswith("image/"):
+        photo = replied.document.file_id
+
+    if not photo:
+        await update.message.reply_text("❌ The replied message must contain an image.")
+        return
+
+    raw_name, raw_anime, raw_rarity, raw_edition = context.args
 
     try:
         rarity = RARITY_MAP[int(raw_rarity)]
     except (KeyError, ValueError):
         await update.message.reply_text(
-            f"❌ Invalid rarity number. Use 1–{len(RARITY_MAP)}.", parse_mode=ParseMode.HTML)
+            f"❌ Invalid rarity. Use 1–{len(RARITY_MAP)}.",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
-    name    = raw_name.replace("-", " ").title()
-    anime   = raw_anime.replace("-", " ").title()
+    try:
+        edition = EDITION_MAP[int(raw_edition)]
+    except (KeyError, ValueError):
+        await update.message.reply_text(
+            f"❌ Invalid edition. Use 1–{len(EDITION_MAP)}.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    name = raw_name.replace("-", " ").title()
+    anime = raw_anime.replace("-", " ").title()
     char_id = await _next_id()
-    char    = {"img_url": img_url, "name": name, "anime": anime,
-               "rarity": rarity, "id": char_id}
+
+    char = {
+        "img_url": photo,
+        "name": name,
+        "anime": anime,
+        "rarity": rarity,
+        "edition": edition,
+        "id": char_id,
+    }
 
     try:
         msg = await context.bot.send_photo(
             chat_id=CHARA_CHANNEL_ID,
-            photo=img_url,
-            caption=_char_caption(char, update.effective_user.id, update.effective_user.first_name),
+            photo=photo,
+            caption=_char_caption(
+                char, update.effective_user.id, update.effective_user.first_name
+            ),
             parse_mode=ParseMode.HTML,
         )
         char["message_id"] = msg.message_id
         await collection.insert_one(char)
         await update.message.reply_text(
-            f"✅ <b>{name}</b> added!  ID: <code>{char_id}</code>",
+            f"✅ <b>{name}</b> added!\n"
+            f"🆔 ID: <code>{char_id}</code>\n"
+            f"🍋 Rarity: {rarity}\n"
+            f"🎀 Edition: {edition}",
             parse_mode=ParseMode.HTML,
         )
     except Exception as e:
@@ -136,6 +182,7 @@ def _parse_caption(caption: str) -> dict | None:
     patterns = {
         "name":   r"(?:🍀\s*)?Name\s*:\s*(.+)",
         "rarity": r"(?:🍋\s*)?Rarity\s*:\s*(.+)",
+        "edition": r"(?:🎀\s*)?Edition\s*:\s*(.+)",
         "anime":  r"(?:🌸\s*)?Anime\s*:\s*(.+)",
         "id":     r"(?:🌱\s*)?ID\s*:\s*(\S+)",
     }
@@ -149,6 +196,7 @@ def _parse_caption(caption: str) -> dict | None:
 
     # Normalise rarity string to our canonical format
     raw_rarity = fields.get("rarity", "").lower()
+    raw_edition = fields.get("edition", "").lower()
     # Try exact match first
     rarity = RARITY_STRS.get(raw_rarity)
     if not rarity:
@@ -158,7 +206,14 @@ def _parse_caption(caption: str) -> dict | None:
                 rarity = val
                 break
     if not rarity:
-        rarity = "⚪ Common"   # safe fallback
+        rarity = RARITY_MAP.get(1, "⚪ Legendary")
+
+    edition = EDITION_STRS.get(raw_edition)
+    if not edition:
+        for key, val in EDITION_STRS.items():
+            if raw_edition and (raw_edition in key or key in raw_edition):
+                edition = val
+                break
 
     return {
         "name":   fields["name"].title(),
@@ -225,6 +280,7 @@ async def uploadchar(update: Update, context: CallbackContext) -> None:
         "name":    parsed["name"],
         "anime":   parsed["anime"],
         "rarity":  parsed["rarity"],
+        "edition": parsed.get("edition"),
         "id":      char_id,
     }
 
@@ -279,7 +335,7 @@ async def delete(update: Update, context: CallbackContext) -> None:
 
 # ── /update ───────────────────────────────────────────────────────────────────
 
-_VALID = {"img_url", "name", "anime", "rarity"}
+_VALID = {"img_url", "name", "anime", "rarity", "edition"}
 
 
 async def update_char(upd: Update, context: CallbackContext) -> None:
@@ -311,6 +367,12 @@ async def update_char(upd: Update, context: CallbackContext) -> None:
             new_val = RARITY_MAP[int(raw)]
         except (KeyError, ValueError):
             await upd.message.reply_text(f"❌ Invalid rarity. Use 1–{len(RARITY_MAP)}.")
+            return
+    elif field == "edition":
+        try:
+            new_val = EDITION_MAP[int(raw)]
+        except (KeyError, ValueError):
+            await upd.message.reply_text(f"❌ Invalid edition. Use 1–{len(EDITION_MAP)}.")
             return
     elif field == "img_url":
         if not await _validate_url(raw):
@@ -353,3 +415,4 @@ application.add_handler(CommandHandler("upload",     upload,      block=False))
 application.add_handler(CommandHandler("uploadchar", uploadchar,  block=False))
 application.add_handler(CommandHandler("delete",     delete,      block=False))
 application.add_handler(CommandHandler("update",     update_char, block=False))
+   
