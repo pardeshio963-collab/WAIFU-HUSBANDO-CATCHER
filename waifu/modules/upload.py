@@ -27,7 +27,17 @@ from telegram.ext import CallbackContext, CommandHandler
 from waifu import application, collection, db, sudo_users, OWNER_ID, CHARA_CHANNEL_ID
 from waifu.config import Config
 
-RARITY_MAP  = Config.RARITY_MAP
+# Harem/upload rarity list — keep these 8 only.
+RARITY_MAP = {
+    1: "⚪ Common",
+    2: "🟣 Rare",
+    3: "🟡 Legendary",
+    4: "🪁 Skyrise",
+    5: "💮 Exclusive",
+    6: "🔮 Mythical",
+    7: "🫧 Special",
+    8: "🌤️ Summer",
+}
 EDITION_MAP = Config.EDITION_MAP
 RARITY_STRS = {v.lower(): v for v in RARITY_MAP.values()}
 EDITION_STRS = {v.lower(): v for v in EDITION_MAP.values()}
@@ -216,10 +226,11 @@ def _parse_caption(caption: str) -> dict | None:
                 break
 
     return {
-        "name":   fields["name"].title(),
-        "anime":  fields["anime"].title(),
-        "rarity": rarity,
-        "id":     fields.get("id"),       # None → auto-generate
+        "name":    fields["name"].title(),
+        "anime":   fields["anime"].title(),
+        "rarity":  rarity,
+        "edition": edition,
+        "id":      fields.get("id"),       # None → auto-generate
     }
 
 
@@ -415,4 +426,3 @@ application.add_handler(CommandHandler("upload",     upload,      block=False))
 application.add_handler(CommandHandler("uploadchar", uploadchar,  block=False))
 application.add_handler(CommandHandler("delete",     delete,      block=False))
 application.add_handler(CommandHandler("update",     update_char, block=False))
-   
