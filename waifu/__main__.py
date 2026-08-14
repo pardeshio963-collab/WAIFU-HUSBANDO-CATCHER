@@ -3,8 +3,29 @@ waifu/__main__.py  —  Entry point.
 Run with:  python -m waifu
 """
 import importlib
+import os
+import threading
+
+from flask import Flask
 
 from waifu import ALL_MODULES, LOGGER
+
+
+# Render health-check web server.
+_web_app = Flask(__name__)
+
+@_web_app.route("/")
+def _health_check():
+    return "Waifu bot is running!", 200
+
+def _run_web_server() -> None:
+    port = int(os.environ.get("PORT", 10000))
+    _web_app.run(host="0.0.0.0", port=port, use_reloader=False)
+
+def _start_web_server() -> None:
+    thread = threading.Thread(target=_run_web_server, daemon=True)
+    thread.start()
+    LOGGER.info("Web server started on port %s.", os.environ.get("PORT", "10000"))
 
 
 async def _migrate_indexes() -> None:
@@ -36,6 +57,8 @@ async def _post_init(application) -> None:
 
 
 def main() -> None:
+    _start_web_server()
+
     LOGGER.info("Loading %d module(s)…", len(ALL_MODULES))
     for name in ALL_MODULES:
         try:
