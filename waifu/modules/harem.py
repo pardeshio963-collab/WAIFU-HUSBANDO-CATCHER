@@ -186,24 +186,41 @@ async def _send_character_albums(context: CallbackContext, user_id: int, chars: 
 async def _reply_harem(update: Update, context: CallbackContext, text: str,
                        markup: InlineKeyboardMarkup, photo: str | None,
                        chars: list[dict]) -> None:
-    """Send the Harem summary plus every character image for this page."""
-    user_id = update.effective_user.id
-    is_cb = bool(update.callback_query)
+    """Original style: one image on top + text in same message."""
 
-    if not is_cb:
-        await _delete_album(context, user_id)
-        # Keep the Harem summary as a normal text message so every character
-        # image can be shown below it without the old single-photo loading issue.
-        msg = await update.message.reply_text(
-            text, parse_mode=ParseMode.HTML, reply_markup=markup
-        )
-        context.user_data["harem_summary_id"] = msg.message_id
+    if update.message:
+        if photo:
+            await update.message.reply_photo(
+                photo=photo,
+                caption=text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=markup,
+            )
+        else:
+            await update.message.reply_text(
+                text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=markup,
+            )
         return
 
+    q = update.callback_query
     try:
-        await update.callback_query.edit_message_text(
-            text, parse_mode=ParseMode.HTML, reply_markup=markup
-        )
+        if photo:
+            await q.edit_message_media(
+                media=InputMediaPhoto(
+                    media=photo,
+                    caption=text,
+                    parse_mode=ParseMode.HTML,
+                ),
+                reply_markup=markup,
+            )
+        else:
+            await q.edit_message_caption(
+                caption=text,
+                parse_mode=ParseMode.HTML,
+                reply_markup=markup,
+            )
     except BadRequest as e:
         if "not modified" not in str(e).lower():
             raise
