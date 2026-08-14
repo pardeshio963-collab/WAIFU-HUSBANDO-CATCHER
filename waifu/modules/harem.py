@@ -5,7 +5,7 @@ import math
 from html import escape
 from itertools import groupby
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputMediaPhoto
 from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import CallbackContext, CallbackQueryHandler, CommandHandler
@@ -17,15 +17,32 @@ _MEDALS = {
     "⚪ Common": "⚪",
     "🟣 Rare": "🟣",
     "🟡 Legendary": "🟡",
+    "🪁 Skyrise": "🪁",
     "💮 Exclusive": "💮",
     "🔮 Mythical": "🔮",
     "🫧 Special": "🫧",
     "🌤️ Summer": "🌤️",
-    "🪁 Skyrise": "🪁",
 }
 
 def _rarity_icon(rarity: str) -> str:
     return _MEDALS.get(rarity, "🎴")
+
+
+_EDITION_ICONS = {
+    "🎃 Halloween": "🎃", "💕 Valentine": "💕", "🩺 Doctor": "🩺",
+    "🐞 Bug": "🐞", "🧘 Monk": "🧘", "🏀 Basketball": "🏀",
+    "👶 Chibi": "👶", "👘 Kimono": "👘", "☕ Coffee": "☕",
+    "🌈 Holi": "🌈", "🧜 Mermaid": "🧜", "🥻 Saree": "🥻",
+    "🫥 Abses": "🫥", "🎀 Maid": "🎀", "🎵 Music": "🎵",
+    "❄️ Winter": "❄️", "🪔 Diwali": "🪔", "🎮 Game": "🎮",
+    "🎄 Xmas": "🎄", "☀️ Summer": "☀️",
+}
+
+def _edition_text(edition: str | None) -> str:
+    if not edition:
+        return ""
+    # Stored edition values are already canonical in the upload system.
+    return f"🎀 {escape(str(edition))}"
 
 
 async def _anime_totals(animes: list[str]) -> dict[str, int]:
@@ -111,58 +128,93 @@ async def _build_page(user_id: int, page: int) -> tuple[str, InlineKeyboardMarku
     return text, markup, photo, page_chars
 
 
-async def _reply_harem(update: Update, text: str,
-                       markup: InlineKeyboardMarkup, photo: str | None,
-                       chars: list[dict] | None = None) -> None:
-    """Send harem text and the character images separately."""
-    is_cb = bool(update.callback_query)
-    if not is_cb:
-        if photo:
-            await update.message.reply_photo(
-                photo, caption=text, parse_mode=ParseMode.HTML, reply_markup=markup)
-        else:
-            await update.message.reply_text(
-                text, parse_mode=ParseMode.HTML, reply_markup=markup)
+async def _delete_album(context: CallbackContext, user_id: int) -> None:
+    """Delete character-image messages from the previous harem page."""
+    old_ids = context.user_data.get("harem_album_ids", [])
+    if not old_ids:
+        return
+    for mid in old_ids:
+        try:
+            await context.bot.delete_message(chat_id=user_id, message_id=mid)
+        except Exception:
+            pass
+    context.user_data["harem_album_ids"] = []
 
-        # Send every character image that has a valid img_url.
-        # Telegram cannot put multiple independent photos in one message,
-        # so each character is sent as its own photo message.
-        if chars:
-            for c in chars:
-                img_url = c.get("img_url")
-                if not img_url:
-                    continue
+
+async def _send_character_albums(context: CallbackContext, user_id: int, chars: list[dict]) -> None:
+    """Send every character image on the current page, in Telegram albums."""
+    await _delete_album(context, user_id)
+    media: list[InputMediaPhoto] = []
+
+    for c in chars:
+        img_url = c.get("img_url")
+        if not img_url:
+            continue
+        rarity = c.get("rarity", "")
+        edition = c.get("edition")
+        icon = _rarity_icon(rarity)
+        edition_line = _edition_text(edition)
+        caption = (
+            f"{icon} <b>{escape(str(rarity or 'Unknown'))}</b>\n"
+            f"{edition_line + chr(10) if edition_line else ''}"
+            f"🎴 <b>{escape(str(c.get('name', 'Unknown')))}</b>\n"
+            f"📺 {escape(str(c.get('anime', 'Unknown')))}"
+        )
+        media.append(InputMediaPhoto(media=img_url, caption=caption, parse_mode=ParseMode.HTML))
+
+    sent_ids: list[int] = []
+    # Telegram allows at most 10 items per media group.
+    for i in range(0, len(media), 10):
+        try:
+            messages = await context.bot.send_media_group(chat_id=user_id, media=media[i:i+10])
+            sent_ids.extend(m.message_id for m in messages)
+        except Exception:
+            # If a URL is invalid, continue with the remaining characters instead
+            # of making the whole Harem fail.
+            for item in media[i:i+10]:
                 try:
-                    await update.message.reply_photo(
-                        img_url,
-                        caption=(
-                            f"{_rarity_icon(c.get('rarity', ''))} "
-                            f"<b>{escape(c.get('rarity', ''))}</b>\n"
-                            f"🎀 {escape(c.get('edition') or 'None')}\n"
-                            f"🎴 {escape(c.get('name', 'Unknown'))}"
-                        ),
-                        parse_mode=ParseMode.HTML,
+                    msg = await context.bot.send_photo(
+                        chat_id=user_id, photo=item.media, caption=item.caption, parse_mode=ParseMode.HTML
                     )
+                    sent_ids.append(msg.message_id)
                 except Exception:
                     pass
+
+    context.user_data["harem_album_ids"] = sent_ids
+
+
+async def _reply_harem(update: Update, context: CallbackContext, text: str,
+                       markup: InlineKeyboardMarkup, photo: str | None,
+                       chars: list[dict]) -> None:
+    """Send the Harem summary plus every character image for this page."""
+    user_id = update.effective_user.id
+    is_cb = bool(update.callback_query)
+
+    if not is_cb:
+        await _delete_album(context, user_id)
+        # Keep the Harem summary as a normal text message so every character
+        # image can be shown below it without the old single-photo loading issue.
+        msg = await update.message.reply_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=markup
+        )
+        context.user_data["harem_summary_id"] = msg.message_id
+        await _send_character_albums(context, user_id, chars)
         return
 
     try:
-        if photo:
-            await update.callback_query.edit_message_caption(
-                caption=text, parse_mode=ParseMode.HTML, reply_markup=markup)
-        else:
-            await update.callback_query.edit_message_text(
-                text, parse_mode=ParseMode.HTML, reply_markup=markup)
+        await update.callback_query.edit_message_text(
+            text, parse_mode=ParseMode.HTML, reply_markup=markup
+        )
     except BadRequest as e:
         if "not modified" not in str(e).lower():
             raise
+    await _send_character_albums(context, user_id, chars)
 
 
 async def harem(update: Update, context: CallbackContext, page: int = 0) -> None:
     user_id = update.effective_user.id
     text, markup, photo, page_chars = await _build_page(user_id, page)
-    await _reply_harem(update, text, markup, photo, page_chars)
+    await _reply_harem(update, context, text, markup, photo, page_chars)
 
 
 async def harem_callback(update: Update, context: CallbackContext) -> None:
@@ -182,4 +234,4 @@ async def noop(update: Update, context: CallbackContext) -> None:
 application.add_handler(CommandHandler(["harem", "collection"], harem, block=False))
 application.add_handler(CallbackQueryHandler(harem_callback, pattern=r"^harem:\d+:\d+$", block=False))
 application.add_handler(CallbackQueryHandler(noop, pattern=r"^noop$", block=False))
-            
+    
