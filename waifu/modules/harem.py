@@ -198,7 +198,6 @@ async def _reply_harem(update: Update, context: CallbackContext, text: str,
             text, parse_mode=ParseMode.HTML, reply_markup=markup
         )
         context.user_data["harem_summary_id"] = msg.message_id
-        await _send_character_albums(context, user_id, chars)
         return
 
     try:
@@ -208,7 +207,6 @@ async def _reply_harem(update: Update, context: CallbackContext, text: str,
     except BadRequest as e:
         if "not modified" not in str(e).lower():
             raise
-    await _send_character_albums(context, user_id, chars)
 
 
 async def harem(update: Update, context: CallbackContext, page: int = 0) -> None:
