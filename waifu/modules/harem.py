@@ -15,12 +15,14 @@ from waifu import application, user_collection, waifu_collection
 _PAGE = 15
 _MEDALS = {
     "⚪ Common": "⚪",
-    "🟣 Rare":   "🟣",
+    "🟣 Rare": "🟣",
     "🟡 Legendary": "🟡",
-    "🟢 Medium": "🟢",
-    "💮 Special Edition": "💮",
+    "💮 Exclusive": "💮",
+    "🔮 Mythical": "🔮",
+    "🫧 Special": "🫧",
+    "🌤️ Summer": "🌤️",
+    "🪁 Skyrise": "🪁",
 }
-
 
 def _rarity_icon(rarity: str) -> str:
     return _MEDALS.get(rarity, "🎴")
@@ -133,7 +135,12 @@ async def _reply_harem(update: Update, text: str,
                 try:
                     await update.message.reply_photo(
                         img_url,
-                        caption=f"🎴 {escape(c.get('name', 'Unknown'))}",
+                        caption=(
+                            f"{_rarity_icon(c.get('rarity', ''))} "
+                            f"<b>{escape(c.get('rarity', ''))}</b>\n"
+                            f"🎀 {escape(c.get('edition') or 'None')}\n"
+                            f"🎴 {escape(c.get('name', 'Unknown'))}"
+                        ),
                         parse_mode=ParseMode.HTML,
                     )
                 except Exception:
@@ -175,4 +182,4 @@ async def noop(update: Update, context: CallbackContext) -> None:
 application.add_handler(CommandHandler(["harem", "collection"], harem, block=False))
 application.add_handler(CallbackQueryHandler(harem_callback, pattern=r"^harem:\d+:\d+$", block=False))
 application.add_handler(CallbackQueryHandler(noop, pattern=r"^noop$", block=False))
-    
+            
