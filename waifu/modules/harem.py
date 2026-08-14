@@ -34,11 +34,11 @@ async def _anime_totals(animes: list[str]) -> dict[str, int]:
     return {d["_id"]: d["n"] async for d in waifu_collection.aggregate(pipeline)}
 
 
-async def _build_page(user_id: int, page: int) -> tuple[str, InlineKeyboardMarkup, str | None]:
+async def _build_page(user_id: int, page: int) -> tuple[str, InlineKeyboardMarkup, str | None, list[dict]]:
     """Returns (text, keyboard, photo_url)."""
     user = await user_collection.find_one({"id": user_id})
     if not user or not user.get("characters"):
-        return "📭 Your harem is empty — go catch some characters!", InlineKeyboardMarkup([]), None
+        return "📭 Your harem is empty — go catch some characters!", InlineKeyboardMarkup([]), None, []
 
     chars = user["characters"]
     # Deduplicate keeping all counts
@@ -106,11 +106,13 @@ async def _build_page(user_id: int, page: int) -> tuple[str, InlineKeyboardMarku
     if not photo and page_chars:
         photo = page_chars[0].get("img_url")
 
-    return text, markup, photo
+    return text, markup, photo, page_chars
 
 
 async def _reply_harem(update: Update, text: str,
-                       markup: InlineKeyboardMarkup, photo: str | None) -> None:
+                       markup: InlineKeyboardMarkup, photo: str | None,
+                       chars: list[dict] | None = None) -> None:
+    """Send harem text and the character images separately."""
     is_cb = bool(update.callback_query)
     if not is_cb:
         if photo:
@@ -119,6 +121,23 @@ async def _reply_harem(update: Update, text: str,
         else:
             await update.message.reply_text(
                 text, parse_mode=ParseMode.HTML, reply_markup=markup)
+
+        # Send every character image that has a valid img_url.
+        # Telegram cannot put multiple independent photos in one message,
+        # so each character is sent as its own photo message.
+        if chars:
+            for c in chars:
+                img_url = c.get("img_url")
+                if not img_url:
+                    continue
+                try:
+                    await update.message.reply_photo(
+                        img_url,
+                        caption=f"🎴 {escape(c.get('name', 'Unknown'))}",
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    pass
         return
 
     try:
@@ -135,8 +154,8 @@ async def _reply_harem(update: Update, text: str,
 
 async def harem(update: Update, context: CallbackContext, page: int = 0) -> None:
     user_id = update.effective_user.id
-    text, markup, photo = await _build_page(user_id, page)
-    await _reply_harem(update, text, markup, photo)
+    text, markup, photo, page_chars = await _build_page(user_id, page)
+    await _reply_harem(update, text, markup, photo, page_chars)
 
 
 async def harem_callback(update: Update, context: CallbackContext) -> None:
@@ -156,3 +175,4 @@ async def noop(update: Update, context: CallbackContext) -> None:
 application.add_handler(CommandHandler(["harem", "collection"], harem, block=False))
 application.add_handler(CallbackQueryHandler(harem_callback, pattern=r"^harem:\d+:\d+$", block=False))
 application.add_handler(CallbackQueryHandler(noop, pattern=r"^noop$", block=False))
+    
