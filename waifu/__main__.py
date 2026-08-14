@@ -48,12 +48,9 @@ async def _migrate_indexes() -> None:
 async def _post_init(application) -> None:
     """Runs once after the Application starts — migrations, indexes, scheduler."""
     from waifu.modules.inlinequery import create_indexes
-    from waifu.modules.waifu_drop  import start_scheduler
     await _migrate_indexes()
     await create_indexes()
     LOGGER.info("DB indexes ensured.")
-    start_scheduler(application.bot)
-    LOGGER.info("Drop scheduler started.")
 
 
 def main() -> None:
