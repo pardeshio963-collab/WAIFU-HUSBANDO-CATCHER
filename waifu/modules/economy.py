@@ -366,7 +366,107 @@ async def claim(update: Update, context: CallbackContext) -> None:
         )
 
 
+# ── /check ────────────────────────────────────────────────────────────────────
+
+async def check(update: Update, context: CallbackContext) -> None:
+    """Show the top 10 owners of a character."""
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: <code>/check [character name or ID]</code>\n\n"
+            "Example: <code>/check Naruto</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    query = " ".join(context.args).strip()
+    if not query:
+        await update.message.reply_text(
+            "❌ Please enter a character name or ID.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    # Find users whose character collection contains the requested character.
+    # Matching is case-insensitive for names and exact for IDs.
+    users = []
+    async for doc in user_collection.find(
+        {"characters": {"$exists": True, "$ne": []}},
+        {"id": 1, "username": 1, "first_name": 1, "characters": 1},
+    ):
+        characters = doc.get("characters", [])
+        owned = [
+            c for c in characters
+            if str(c.get("id", "")) == query
+            or str(c.get("name", "")).casefold() == query.casefold()
+        ]
+
+        if owned:
+            # Count copies by character ID/name match.
+            count = len(owned)
+            char = owned[0]
+            users.append((count, doc, char))
+
+    if not users:
+        await update.message.reply_text(
+            f"❌ No owners found for <b>{escape(query)}</b>.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    users.sort(key=lambda item: (-item[0], item[1].get("first_name", "").casefold()))
+
+    char = users[0][2]
+    char_name = char.get("name", query)
+    rarity = char.get("rarity", "🎴 Unknown")
+    char_id = char.get("id", "—")
+
+    lines = [
+        "╭━━━━━━━━━━━━━━━━━━╮",
+        "✨ <b>CHARACTER OWNERS</b> ✨",
+        "╰━━━━━━━━━━━━━━━━━━╯",
+        "",
+        f"🎴 <b>{escape(str(char_name))}</b>",
+        f"💎 <b>{escape(str(rarity))}</b>",
+        f"🆔 <code>{escape(str(char_id))}</code>",
+        "",
+        "🏆 <b>TOP 10 OWNERS</b>",
+        "━━━━━━━━━━━━━━━━━━",
+        "",
+    ]
+
+    medals = ["🥇", "🥈", "🥉"]
+    for rank, (count, doc, _) in enumerate(users[:10], 1):
+        medal = medals[rank - 1] if rank <= 3 else f"{rank:02d}."
+        username = doc.get("username")
+        first_name = doc.get("first_name") or "Unknown"
+
+        if username:
+            display = f"@{escape(str(username))}"
+        else:
+            display = escape(str(first_name))
+
+        lines.append(f"{medal} <b>{display}</b> — <code>×{count}</code>")
+
+    total_owners = len(users)
+    total_copies = sum(item[0] for item in users)
+
+    lines.extend([
+        "",
+        "━━━━━━━━━━━━━━━━━━",
+        f"👥 <b>Total Owners:</b> {total_owners}",
+        f"🎴 <b>Total Copies:</b> {total_copies}",
+        "━━━━━━━━━━━━━━━━━━",
+        "✨ <i>Ownership leaderboard</i>",
+    ])
+
+    await update.message.reply_text(
+        "\n".join(lines),
+        parse_mode=ParseMode.HTML,
+    )
+
+
 application.add_handler(CommandHandler("balance", balance, block=False))
+application.add_handler(CommandHandler("check",    check,    block=False))
 application.add_handler(CommandHandler("daily",   daily,   block=False))
 application.add_handler(CommandHandler("claim",   claim,   block=False))
 application.add_handler(CommandHandler("sell",    sell,    block=False))
