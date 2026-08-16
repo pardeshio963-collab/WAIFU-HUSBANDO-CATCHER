@@ -304,9 +304,9 @@ async def claim(update: Update, context: CallbackContext) -> None:
     # Weighted rarity selection
     roll = random.randint(1, 100)
 
-    if roll <= 65:
+    if roll <= 35:
         rarity = "⚪ Common"
-    elif roll <= 85:
+    elif roll <= 70:
         rarity = "🟡 Legendary"
     else:
         rarity = "🟣 Rare"
@@ -374,4 +374,5 @@ application.add_handler(CommandHandler("market",  market,  block=False))
 application.add_handler(CommandHandler("buy",     buy,     block=False))
 application.add_handler(CommandHandler("delist",  delist,  block=False))
 application.add_handler(CallbackQueryHandler(market_page_cb, pattern=r"^market:\d+$", block=False))
+
     
