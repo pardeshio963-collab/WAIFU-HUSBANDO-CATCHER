@@ -3,7 +3,7 @@ import time
 from html import escape
 from pymongo import ASCENDING
 from cachetools import TTLCache
-from telegram import InlineQueryResultPhoto, Update
+from telegram import InlineQueryResultCachedPhoto, InlineQueryResultPhoto, Update
 from telegram.ext import CallbackContext, InlineQueryHandler
 from waifu import application, collection, db, user_collection
 
@@ -142,9 +142,20 @@ async def inlinequery(update: Update, context: CallbackContext) -> None:
         # FIX 3: InlineQueryResultPhoto requires a real HTTPS URL.
         # Characters uploaded via /uploadchar store a Telegram file_id, not
         # a URL. Resolve it via bot.get_file() and cache the result.
-        photo_url = await _resolve_url(c.get("img_url", ""), context.bot)
-        if not photo_url:
-            continue   # skip characters whose image can't be resolved
+        img = c.get("img_url", "")
+        if not img:
+            continue
+
+        # Characters uploaded by /uploadchar store a Telegram file_id.
+        # Use InlineQueryResultCachedPhoto for those instead of converting
+        # the file_id to an API download URL. This is much more reliable
+        # for Telegram inline results.
+        is_file_id = not str(img).startswith(("http://", "https://"))
+        photo_url = None if is_file_id else str(img)
+
+        if not is_file_id:
+            if not photo_url:
+                continue
 
         if user and raw.startswith("collection."):
             u_cnt = sum(1 for x in user.get("characters", []) if x["id"] == c["id"])
@@ -169,13 +180,23 @@ async def inlinequery(update: Update, context: CallbackContext) -> None:
                 f"Guessed globally <b>{gc}</b> time{'s' if gc != 1 else ''}."
             )
 
-        results.append(InlineQueryResultPhoto(
-            id=f"{c['id']}_{time.time_ns()}",
-            photo_url=photo_url,
-            thumbnail_url=photo_url,
-            caption=cap,
-            parse_mode="HTML",
-        ))
+        result_id = f"{c['id']}_{time.time_ns()}"
+
+        if is_file_id:
+            results.append(InlineQueryResultCachedPhoto(
+                id=result_id,
+                photo_file_id=str(img),
+                caption=cap,
+                parse_mode="HTML",
+            ))
+        else:
+            results.append(InlineQueryResultPhoto(
+                id=result_id,
+                photo_url=photo_url,
+                thumbnail_url=photo_url,
+                caption=cap,
+                parse_mode="HTML",
+            ))
 
     await update.inline_query.answer(results, next_offset=next_offset, cache_time=5)
 
