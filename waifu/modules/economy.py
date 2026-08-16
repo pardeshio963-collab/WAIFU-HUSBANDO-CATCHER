@@ -459,10 +459,20 @@ async def check(update: Update, context: CallbackContext) -> None:
         "✨ <i>Ownership leaderboard</i>",
     ])
 
-    await update.message.reply_text(
-        "\n".join(lines),
-        parse_mode=ParseMode.HTML,
-    )
+    result_text = "\n".join(lines)
+    char_img = char.get("img_url")
+
+    if char_img:
+        await update.message.reply_photo(
+            photo=char_img,
+            caption=result_text,
+            parse_mode=ParseMode.HTML,
+        )
+    else:
+        await update.message.reply_text(
+            result_text,
+            parse_mode=ParseMode.HTML,
+        )
 
 
 application.add_handler(CommandHandler("balance", balance, block=False))
