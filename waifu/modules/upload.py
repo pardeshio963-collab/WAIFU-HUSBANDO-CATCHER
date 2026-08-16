@@ -91,15 +91,12 @@ async def upload(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text("❌ Sudo only.")
         return
 
-    if len(context.args) != 4:
+    if len(context.args) not in (3, 4):
         await update.message.reply_text(
             "❌ Wrong format\n\n"
-            "<code>/upload name anime rarity edition</code>\n\n"
-            "<b>Rarities:</b>\n"
-            + "\n".join(f"  {k} → {v}" for k, v in RARITY_MAP.items())
-            + "\n\n<b>Editions:</b>\n"
-            + "\n".join(f"  {k} → {v}" for k, v in EDITION_MAP.items())
-            + "\n\n<i>Reply to the character image when using /upload.</i>",
+            "<code>/upload name anime rarity [edition]</code>\n\n"
+            "💡 Edition is optional.\n"
+            "<i>Reply to the character image when using /upload.</i>",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -119,25 +116,28 @@ async def upload(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text("❌ The replied message must contain an image.")
         return
 
-    raw_name, raw_anime, raw_rarity, raw_edition = context.args
+    raw_name, raw_anime, raw_rarity = context.args[:3]
+    raw_edition = context.args[3] if len(context.args) == 4 else None
 
     try:
         rarity = RARITY_MAP[int(raw_rarity)]
     except (KeyError, ValueError):
         await update.message.reply_text(
-            f"❌ Invalid rarity. Use 1–{len(RARITY_MAP)}.",
+            f"❌ Invalid rarity number. Use 1–{len(RARITY_MAP)}.",
             parse_mode=ParseMode.HTML,
         )
         return
 
-    try:
-        edition = EDITION_MAP[int(raw_edition)]
-    except (KeyError, ValueError):
-        await update.message.reply_text(
-            f"❌ Invalid edition. Use 1–{len(EDITION_MAP)}.",
-            parse_mode=ParseMode.HTML,
-        )
-        return
+    edition = None
+    if raw_edition is not None:
+        try:
+            edition = EDITION_MAP[int(raw_edition)]
+        except (KeyError, ValueError):
+            await update.message.reply_text(
+                f"❌ Invalid edition number. Use 1–{len(EDITION_MAP)}.",
+                parse_mode=ParseMode.HTML,
+            )
+            return
 
     name = raw_name.replace("-", " ").title()
     anime = raw_anime.replace("-", " ").title()
@@ -163,13 +163,15 @@ async def upload(update: Update, context: CallbackContext) -> None:
         )
         char["message_id"] = msg.message_id
         await collection.insert_one(char)
-        await update.message.reply_text(
+        success = (
             f"✅ <b>{name}</b> added!\n"
             f"🆔 ID: <code>{char_id}</code>\n"
-            f"🍋 Rarity: {rarity}\n"
-            f"🎀 Edition: {edition}",
-            parse_mode=ParseMode.HTML,
+            f"🍋 Rarity: {rarity}"
         )
+        if edition:
+            success += f"\n🎀 Edition: {edition}"
+
+        await update.message.reply_text(success, parse_mode=ParseMode.HTML)
     except Exception as e:
         await update.message.reply_text(
             f"❌ Channel post failed: {e}\nCharacter was <b>not</b> saved.",
@@ -318,6 +320,30 @@ async def uploadchar(update: Update, context: CallbackContext) -> None:
         )
 
 
+# ── /rarities and /editions ─────────────────────────────────────────────────────
+
+async def rarities(update: Update, context: CallbackContext) -> None:
+    if not _is_sudo(update.effective_user.id):
+        await update.message.reply_text("❌ Sudo only.")
+        return
+
+    text = "<b>🍋 Rarity List</b>\n\n" + "\n".join(
+        f"<code>{k}</code> → {v}" for k, v in RARITY_MAP.items()
+    )
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
+async def editions(update: Update, context: CallbackContext) -> None:
+    if not _is_sudo(update.effective_user.id):
+        await update.message.reply_text("❌ Sudo only.")
+        return
+
+    text = "<b>🎀 Edition List</b>\n\n" + "\n".join(
+        f"<code>{k}</code> → {v}" for k, v in EDITION_MAP.items()
+    )
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML)
+
+
 # ── /delete ───────────────────────────────────────────────────────────────────
 
 async def delete(update: Update, context: CallbackContext) -> None:
@@ -424,5 +450,7 @@ async def update_char(upd: Update, context: CallbackContext) -> None:
 
 application.add_handler(CommandHandler("upload",     upload,      block=False))
 application.add_handler(CommandHandler("uploadchar", uploadchar,  block=False))
+application.add_handler(CommandHandler("rarities",   rarities,    block=False))
+application.add_handler(CommandHandler("editions",   editions,    block=False))
 application.add_handler(CommandHandler("delete",     delete,      block=False))
 application.add_handler(CommandHandler("update",     update_char, block=False))
