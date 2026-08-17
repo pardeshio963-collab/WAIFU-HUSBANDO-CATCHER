@@ -34,6 +34,7 @@ def _normalize_code(value: str) -> str:
 
 async def gen_coin_code(update: Update, context: CallbackContext) -> None:
     """Admin: /gencoincode CODE AMOUNT LIMIT"""
+
     if not _is_admin(update.effective_user.id):
         await update.message.reply_text("❌ You are not authorized.")
         return
@@ -69,6 +70,7 @@ async def gen_coin_code(update: Update, context: CallbackContext) -> None:
     limit = int(limit_text)
 
     exists = await redeem_collection.find_one({"code": code})
+
     if exists:
         await update.message.reply_text(
             "❌ That redeem code already exists."
@@ -94,6 +96,7 @@ async def gen_coin_code(update: Update, context: CallbackContext) -> None:
 
 async def gen_char_code(update: Update, context: CallbackContext) -> None:
     """Admin: /gencharcode CODE CHARACTER_ID LIMIT"""
+
     if not _is_admin(update.effective_user.id):
         await update.message.reply_text("❌ You are not authorized.")
         return
@@ -126,6 +129,7 @@ async def gen_char_code(update: Update, context: CallbackContext) -> None:
     limit = int(limit_text)
 
     exists = await redeem_collection.find_one({"code": code})
+
     if exists:
         await update.message.reply_text(
             "❌ That redeem code already exists."
@@ -161,6 +165,7 @@ async def gen_char_code(update: Update, context: CallbackContext) -> None:
 
 async def redeem_coin(update: Update, context: CallbackContext) -> None:
     """User: /redeemcoin CODE"""
+
     user = update.effective_user
 
     if len(context.args) != 1:
@@ -174,7 +179,7 @@ async def redeem_coin(update: Update, context: CallbackContext) -> None:
 
     redeem = await redeem_collection.find_one({
         "code": code,
-        "type": "coins"
+        "type": "coins",
     })
 
     if not redeem:
@@ -190,13 +195,13 @@ async def redeem_coin(update: Update, context: CallbackContext) -> None:
             "$expr": {
                 "$lt": [
                     {"$size": "$redeemed_by"},
-                    "$limit"
+                    "$limit",
                 ]
             },
         },
         {
             "$addToSet": {
-                "redeemed_by": user.id
+                "redeemed_by": user.id,
             }
         },
     )
@@ -214,6 +219,7 @@ async def redeem_coin(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text(
                 "❌ This redeem code has reached its limit."
             )
+
         return
 
     amount = int(redeem["amount"])
@@ -222,7 +228,7 @@ async def redeem_coin(update: Update, context: CallbackContext) -> None:
         {"id": user.id},
         {
             "$inc": {
-                "coins": amount
+                "coins": amount,
             },
             "$set": {
                 "username": user.username,
@@ -248,6 +254,7 @@ async def redeem_coin(update: Update, context: CallbackContext) -> None:
 
 async def redeem_char(update: Update, context: CallbackContext) -> None:
     """User: /redeemchar CODE"""
+
     user = update.effective_user
 
     if len(context.args) != 1:
@@ -261,7 +268,7 @@ async def redeem_char(update: Update, context: CallbackContext) -> None:
 
     redeem = await redeem_collection.find_one({
         "code": code,
-        "type": "character"
+        "type": "character",
     })
 
     if not redeem:
@@ -271,7 +278,7 @@ async def redeem_char(update: Update, context: CallbackContext) -> None:
         return
 
     character = await collection.find_one({
-        "id": redeem["character_id"]
+        "id": redeem["character_id"],
     })
 
     if not character:
@@ -287,13 +294,13 @@ async def redeem_char(update: Update, context: CallbackContext) -> None:
             "$expr": {
                 "$lt": [
                     {"$size": "$redeemed_by"},
-                    "$limit"
+                    "$limit",
                 ]
             },
         },
         {
             "$addToSet": {
-                "redeemed_by": user.id
+                "redeemed_by": user.id,
             }
         },
     )
@@ -311,13 +318,14 @@ async def redeem_char(update: Update, context: CallbackContext) -> None:
             await update.message.reply_text(
                 "❌ This redeem code has reached its limit."
             )
+
         return
 
     await user_collection.update_one(
         {"id": user.id},
         {
             "$push": {
-                "characters": character
+                "characters": character,
             },
             "$set": {
                 "username": user.username,
@@ -334,21 +342,40 @@ async def redeem_char(update: Update, context: CallbackContext) -> None:
         upsert=True,
     )
 
-    await update.message.reply_text(
+    caption = (
         f"🎉 <b>Character redeemed!</b>\n\n"
         f"🌸 <b>{escape(str(character.get('name', 'Unknown')))}</b>\n"
         f"📺 {escape(str(character.get('anime', 'Unknown')))}\n"
         f"💎 {escape(str(character.get('rarity', 'Unknown')))}\n\n"
-        f"Added to your harem! ✨",
-        parse_mode=ParseMode.HTML,
+        f"Added to your harem! ✨"
     )
+
+    image_url = character.get("img_url")
+
+    if image_url:
+        try:
+            await update.message.reply_photo(
+                photo=image_url,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+            )
+        except Exception:
+            await update.message.reply_text(
+                caption,
+                parse_mode=ParseMode.HTML,
+            )
+    else:
+        await update.message.reply_text(
+            caption,
+            parse_mode=ParseMode.HTML,
+        )
 
 
 application.add_handler(
     CommandHandler(
         "gencoincode",
         gen_coin_code,
-        block=False
+        block=False,
     )
 )
 
@@ -356,7 +383,7 @@ application.add_handler(
     CommandHandler(
         "gencharcode",
         gen_char_code,
-        block=False
+        block=False,
     )
 )
 
@@ -364,7 +391,7 @@ application.add_handler(
     CommandHandler(
         "redeemcoin",
         redeem_coin,
-        block=False
+        block=False,
     )
 )
 
@@ -372,6 +399,6 @@ application.add_handler(
     CommandHandler(
         "redeemchar",
         redeem_char,
-        block=False
+        block=False,
     )
-  )
+)
