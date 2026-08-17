@@ -52,29 +52,37 @@ class Config:
 
     # Edition map
     EDITION_MAP: dict[int, str] = {
-        1: "🎃 Halloween",
-        2: "💕 Valentine",
-        3: "🩺 Doctor",
-        4: "🐞 Bug",
-        5: "🧘 Monk",
-        6: "🏀 Basketball",
-        7: "👶 Chibi",
-        8: "👘 Kimono",
-        9: "☕ Coffee",
-        10: "🌈 Holi",
-        11: "🧜 Mermaid",
-        12: "🥻 Saree",
-        13: "🫥 Abses",
-        14: "🎀 Maid",
-        15: "🎵 Music",
-        16: "❄️ Winter",
-        17: "🪔 Diwali",
-        18: "🎮 Game",
-        19: "🎄 Xmas",
-        20: "☀️ Summer",
+        1: "💞 Valentine",
+        2: "🎃 Halloween",
+        3: "❄️ Winter",
+        4: "🏖 Summer",
+        5: "🪔 Diwali",
+        6: "🎸 Music",
+        7: "🏀 Basketball",
+        8: "🧹 Maid",
+        9: "🎮 Game",
+        10: "🎄 Xmas",
+        11: "🩺 Nurse",
+        12: "💍 Bride",
+        13: "🎒 Bag",
+        14: "🚓 Police",
+        15: "🐰 Bunny",
+        16: "🀄️ Abess",
+        17: "👘 Kimono",
+        18: "👶 Chibi",
+        19: "🎊 Cheerleaders",
+        20: "🥻 Saree",
+        21: "🎾 Tennis",
+        22: "🥤 Coffee",
+        23: "🏋️‍♂️ Gym",
+        24: "🔫 Holi",
+        25: "🧜‍♀️ Mermaid",
+        26: "🌦 Monsoon",
+        27: "🎂 Birthday",
+        28: "☀️ Summer",
     }
 
     @classmethod
     def all_sudo(cls) -> set[int]:
         return {cls.OWNER_ID, *cls.sudo_users}
-        
+
