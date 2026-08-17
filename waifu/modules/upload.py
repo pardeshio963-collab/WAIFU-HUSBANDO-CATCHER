@@ -37,6 +37,7 @@ RARITY_MAP = {
     6: "🔮 Mythical",
     7: "🫧 Special",
     8: "🌤️ Summer",
+    9: "🧧 Limited",
 }
 EDITION_MAP = Config.EDITION_MAP
 RARITY_STRS = {v.lower(): v for v in RARITY_MAP.values()}
@@ -454,3 +455,4 @@ application.add_handler(CommandHandler("rarities",   rarities,    block=False))
 application.add_handler(CommandHandler("editions",   editions,    block=False))
 application.add_handler(CommandHandler("delete",     delete,      block=False))
 application.add_handler(CommandHandler("update",     update_char, block=False))
+   
