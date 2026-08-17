@@ -40,14 +40,15 @@ class Config:
 
     # Rarity map
     RARITY_MAP: dict[int, str] = {
-        1: "⚪ Legendary",
+        1: "⚪ Common",
         2: "🟣 Rare",
-        3: "💮 Special",
-        4: "🔵 Limited",
-        5: "🔴 Exclusive",
-        6: "🌌 Celestial",
-        7: "🟠 Mythic",
-        8: "💎 Luxury Edition",
+        3: "🟡 Legendary",
+        4: "🪁 Skyrise",
+        5: "💮 Exclusive",
+        6: "🔮 Mythical",
+        7: "🫧 Special",
+        8: "🌤️ Summer",
+        9: "🧧 Limited",
     }
 
     # Edition map
