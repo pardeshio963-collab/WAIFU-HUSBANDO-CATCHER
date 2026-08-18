@@ -2,6 +2,7 @@
 waifu/__main__.py — Entry point.
 Run with: python -m waifu
 """
+import asyncio
 import hashlib
 import hmac
 import importlib
@@ -19,6 +20,11 @@ from waifu import ALL_MODULES, LOGGER, TOKEN, collection, user_collection
 
 _web_app = Flask(__name__)
 _WEB_DIR = Path(__file__).resolve().parent / "web"
+
+# Flask runs in a separate thread, while Motor belongs to the bot's
+# asyncio event loop. Store the bot loop and submit DB coroutines to it
+# instead of creating a second event loop with asyncio.run().
+_BOT_LOOP = None
 
 
 @_web_app.route("/")
@@ -104,32 +110,77 @@ def _price_for_character(char):
     }.get(char.get("rarity"), 0)
 
 
+def _run_on_bot_loop(coro):
+    """
+    Run an async Motor coroutine on the bot's existing asyncio loop.
+
+    The Flask server is in a separate thread. Creating a new loop here
+    breaks Motor because the AsyncIOMotorClient was created for the bot
+    loop. run_coroutine_threadsafe safely schedules the coroutine on the
+    already-running bot loop.
+    """
+    if _BOT_LOOP is None or _BOT_LOOP.is_closed():
+        # Always close an unscheduled coroutine to avoid a warning.
+        coro.close()
+        raise RuntimeError("Bot event loop is not ready.")
+
+    future = asyncio.run_coroutine_threadsafe(coro, _BOT_LOOP)
+    return future.result(timeout=30)
+
+
+async def _fetch_shop_data(user_id: int):
+    doc = await user_collection.find_one({"id": user_id})
+
+    chars = []
+    async for c in collection.find({}):
+        c = dict(c)
+        c.pop("_id", None)
+        c["price"] = _price_for_character(c)
+        chars.append(c)
+
+    return doc, chars
+
+
+async def _purchase_character(user_id: int, char_id: str):
+    char = await collection.find_one({"id": char_id})
+    if not char:
+        return None, "Character not found."
+
+    price = _price_for_character(char)
+
+    # Atomic balance check + deduction + harem insertion.
+    result = await user_collection.update_one(
+        {"id": user_id, "coins": {"$gte": price}},
+        {
+            "$inc": {"coins": -price},
+            "$push": {"characters": char},
+        },
+    )
+
+    if result.modified_count != 1:
+        user = await user_collection.find_one({"id": user_id}, {"coins": 1})
+        if not user:
+            return None, "Your bot user profile was not found. Use /start first."
+        return None, "Not enough coins."
+
+    new_user = await user_collection.find_one({"id": user_id}, {"coins": 1})
+
+    return {
+        "name": char.get("name", char_id),
+        "price": price,
+        "balance": int((new_user or {}).get("coins", 0)),
+    }, None
+
+
 @_web_app.get("/api/shop/characters")
 def _shop_characters():
     tg_user = _mini_app_user()
     if not tg_user:
         return jsonify({"error": "Invalid or expired Telegram session."}), 401
 
-    user_id = int(tg_user["id"])
-    user = user_collection.find_one  # keeps route readable; actual async DB call below
-
-    # Flask is synchronous while the bot uses Motor. Run the small async operation
-    # in a dedicated event loop for this request.
-    import asyncio
-
-    async def fetch():
-        doc = await user_collection.find_one({"id": user_id})
-        cursor = collection.find({})
-        chars = []
-        async for c in cursor:
-            c = dict(c)
-            c.pop("_id", None)
-            c["price"] = _price_for_character(c)
-            chars.append(c)
-        return doc, chars
-
     try:
-        doc, chars = asyncio.run(fetch())
+        user_id = int(tg_user["id"])
+        doc, chars = _run_on_bot_loop(_fetch_shop_data(user_id))
     except Exception as exc:
         LOGGER.error("Shop character API failed: %s", exc, exc_info=True)
         return jsonify({"error": "Database error."}), 500
@@ -151,40 +202,11 @@ def _shop_buy():
     if not char_id:
         return jsonify({"error": "Character ID is required."}), 400
 
-    import asyncio
-
-    async def purchase():
-        char = await collection.find_one({"id": char_id})
-        if not char:
-            return None, "Character not found."
-
-        price = _price_for_character(char)
-        user_id = int(tg_user["id"])
-
-        # Atomic balance check + deduction + harem insertion.
-        result = await user_collection.update_one(
-            {"id": user_id, "coins": {"$gte": price}},
-            {
-                "$inc": {"coins": -price},
-                "$push": {"characters": char},
-            },
-        )
-
-        if result.modified_count != 1:
-            user = await user_collection.find_one({"id": user_id}, {"coins": 1})
-            if not user:
-                return None, "Your bot user profile was not found. Use /start first."
-            return None, "Not enough coins."
-
-        new_user = await user_collection.find_one({"id": user_id}, {"coins": 1})
-        return {
-            "name": char.get("name", char_id),
-            "price": price,
-            "balance": int((new_user or {}).get("coins", 0)),
-        }, None
-
     try:
-        result, error = asyncio.run(purchase())
+        user_id = int(tg_user["id"])
+        result, error = _run_on_bot_loop(
+            _purchase_character(user_id, char_id)
+        )
     except Exception as exc:
         LOGGER.error("Shop purchase failed: %s", exc, exc_info=True)
         return jsonify({"error": "Purchase failed."}), 500
@@ -216,6 +238,11 @@ async def _migrate_indexes() -> None:
 
 
 async def _post_init(application) -> None:
+    global _BOT_LOOP
+
+    # This is the same asyncio loop Motor is used from by the bot.
+    _BOT_LOOP = asyncio.get_running_loop()
+
     from waifu.modules.inlinequery import create_indexes
     await _migrate_indexes()
     await create_indexes()
