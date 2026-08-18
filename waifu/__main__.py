@@ -110,12 +110,21 @@ def _price_for_character(char):
     }.get(char.get("rarity"), 0)
 
 
-def _run_on_bot_loop(coro):
+async def _await_any(awaitable):
+    # Motor/PyMongo async operations can return Future-like awaitables rather
+    # than native coroutine objects. Wrapping the awaitable guarantees that
+    # run_coroutine_threadsafe always receives an actual coroutine.
+    return await awaitable
+
+
+def _run_on_bot_loop(awaitable):
     if _BOT_LOOP is None or _BOT_LOOP.is_closed():
-        coro.close()
         raise RuntimeError("Bot event loop is not ready.")
 
-    future = asyncio.run_coroutine_threadsafe(coro, _BOT_LOOP)
+    future = asyncio.run_coroutine_threadsafe(
+        _await_any(awaitable),
+        _BOT_LOOP,
+    )
     return future.result(timeout=45)
 
 
