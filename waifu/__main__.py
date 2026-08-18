@@ -200,7 +200,10 @@ def _shop_image(char_id):
     The bot's token is never exposed to the browser.
     """
     try:
-        char = _run_on_bot_loop(collection.find_one({"id": str(char_id)}))
+        async def _get_character():
+            return await collection.find_one({"id": str(char_id)})
+
+        char = _run_on_bot_loop(_get_character())
         if not char or not char.get("img_url"):
             return "", 404
 
