@@ -609,18 +609,44 @@ async def update_char(upd: Update, context: CallbackContext) -> None:
     await collection.update_one({"id": char_id}, {"$set": {field: new_val}})
     char[field] = new_val
 
-    try:
+        try:
         if field == "img_url":
             if char.get("message_id"):
-                await context.bot.delete_message(CHARA_CHANNEL_ID, char["message_id"])
+                await context.bot.delete_message(
+                    CHARA_CHANNEL_ID,
+                    char["message_id"]
+                )
+
             msg = await context.bot.send_photo(
-                CHARA_CHANNEL_ID, photo=new_val,
-                caption=_char_caption(char, upd.effective_user.id, upd.effective_user.first_name),
+                CHARA_CHANNEL_ID,
+                photo=new_val,
+                caption=_char_caption(
+                    char,
+                    upd.effective_user.id,
+                    upd.effective_user.first_name
+                ),
                 parse_mode=ParseMode.HTML,
             )
-            await collection.update_one(
-    {"id": char_id},
-    {"$set": {"message_id": msg.message_id}}
-)
 
-elif char.get("message_id"):
+            await collection.update_one(
+                {"id": char_id},
+                {"$set": {"message_id": msg.message_id}}
+            )
+
+        elif char.get("message_id"):
+            await context.bot.edit_message_caption(
+                CHARA_CHANNEL_ID,
+                char["message_id"],
+                caption=_char_caption(
+                    char,
+                    upd.effective_user.id,
+                    upd.effective_user.first_name
+                ),
+                parse_mode=ParseMode.HTML,
+            )
+
+    except Exception as e:
+        await upd.message.reply_text(
+            f"⚠️ DB updated but channel sync failed: {e}"
+        )
+        return
