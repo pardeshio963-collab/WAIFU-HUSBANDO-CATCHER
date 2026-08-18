@@ -17,6 +17,8 @@ Two upload methods:
 Both methods post to CHARA_CHANNEL_ID and insert into the DB.
 """
 import re
+import io
+from PIL import Image
 
 import aiohttp
 from pymongo import ReturnDocument
@@ -26,6 +28,9 @@ from telegram.ext import CallbackContext, CommandHandler
 
 from waifu import application, collection, db, sudo_users, OWNER_ID, CHARA_CHANNEL_ID
 from waifu.config import Config
+
+# IMPORTANT: Put the Waifu Nexus logo PNG in the same directory as this file.
+# Expected filename: waifu_nexus_logo.png
 
 # Harem/upload rarity list — keep these 8 only.
 RARITY_MAP = {
@@ -49,6 +54,49 @@ WRONG_FORMAT = (
     "<b>Rarity numbers:</b>\n"
     + "\n".join(f"  {k} → {v}" for k, v in RARITY_MAP.items())
 )
+
+
+WATERMARK_PATH = "waifu_nexus_logo.png"
+WATERMARK_MAX_RATIO = 0.11
+WATERMARK_MARGIN_RATIO = 0.025
+
+async def _watermark_photo(bot, file_id: str) -> io.BytesIO:
+    """Download a Telegram image, add a small Waifu Nexus logo, and return JPEG bytes."""
+    tg_file = await bot.get_file(file_id)
+    raw = await tg_file.download_as_bytearray()
+
+    base = Image.open(io.BytesIO(raw)).convert("RGBA")
+    logo = Image.open(WATERMARK_PATH).convert("RGBA")
+
+    # Keep the logo small: about 11% of the image width.
+    target_w = max(40, int(base.width * WATERMARK_MAX_RATIO))
+    scale = target_w / logo.width
+    target_h = max(1, int(logo.height * scale))
+    logo = logo.resize((target_w, target_h), Image.Resampling.LANCZOS)
+
+    margin = max(8, int(base.width * WATERMARK_MARGIN_RATIO))
+    x = margin
+    y = margin
+
+    # Ensure the logo remains inside the image.
+    if x + target_w > base.width:
+        x = max(0, base.width - target_w - margin)
+    if y + target_h > base.height:
+        y = max(0, base.height - target_h - margin)
+
+    base.alpha_composite(logo, (x, y))
+
+    result = io.BytesIO()
+    result.name = "waifu_nexus.jpg"
+    base.convert("RGB").save(result, format="JPEG", quality=95, optimize=True)
+    result.seek(0)
+    return result
+
+
+async def _watermark_and_send_photo(bot, chat_id: int, file_id: str, **kwargs):
+    """Send a watermarked copy and return the resulting Telegram message."""
+    watermarked = await _watermark_photo(bot, file_id)
+    return await bot.send_photo(chat_id=chat_id, photo=watermarked, **kwargs)
 
 
 def _is_sudo(uid: int) -> bool:
@@ -154,9 +202,10 @@ async def upload(update: Update, context: CallbackContext) -> None:
     }
 
     try:
-        msg = await context.bot.send_photo(
-            chat_id=CHARA_CHANNEL_ID,
-            photo=photo,
+        msg = await _watermark_and_send_photo(
+            context.bot,
+            CHARA_CHANNEL_ID,
+            photo,
             caption=_char_caption(
                 char, update.effective_user.id, update.effective_user.first_name
             ),
@@ -299,9 +348,10 @@ async def uploadchar(update: Update, context: CallbackContext) -> None:
     }
 
     try:
-        msg = await context.bot.send_photo(
-            chat_id=CHARA_CHANNEL_ID,
-            photo=photo,
+        msg = await _watermark_and_send_photo(
+            context.bot,
+            CHARA_CHANNEL_ID,
+            photo,
             caption=_char_caption(char, update.effective_user.id, update.effective_user.first_name),
             parse_mode=ParseMode.HTML,
         )
@@ -455,4 +505,5 @@ application.add_handler(CommandHandler("rarities",   rarities,    block=False))
 application.add_handler(CommandHandler("editions",   editions,    block=False))
 application.add_handler(CommandHandler("delete",     delete,      block=False))
 application.add_handler(CommandHandler("update",     update_char, block=False))
+
    
