@@ -618,4 +618,9 @@ async def update_char(upd: Update, context: CallbackContext) -> None:
                 caption=_char_caption(char, upd.effective_user.id, upd.effective_user.first_name),
                 parse_mode=ParseMode.HTML,
             )
-            awa
+            await collection.update_one(
+    {"id": char_id},
+    {"$set": {"message_id": msg.message_id}}
+)
+
+elif char.get("message_id"):
