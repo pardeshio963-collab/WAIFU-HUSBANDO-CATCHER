@@ -1,0 +1,94 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Waifu Nexus — Character Shop</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{--bg:#080808;--card:#121212;--red:#e50914;--text:#f5f5f5;--muted:#9b9b9b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,sans-serif}
+header{position:sticky;top:0;z-index:5;padding:18px 16px;background:linear-gradient(#080808 75%,transparent);backdrop-filter:blur(8px)}
+h1{margin:0;font-size:23px;letter-spacing:.5px}.accent{color:var(--red)}
+.balance{margin-top:8px;color:#ccc;font-size:14px}
+input,select{width:100%;margin-top:12px;padding:12px 14px;border:1px solid #2c2c2c;border-radius:12px;background:#111;color:white;outline:none}
+.filters{display:grid;grid-template-columns:1fr 1fr;gap:8px}.grid{padding:0 12px 30px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.card{overflow:hidden;border:1px solid #252525;border-radius:15px;background:var(--card);box-shadow:0 8px 24px #0008}
+.card img{width:100%;aspect-ratio:1/1.18;object-fit:cover;background:#1b1b1b}.info{padding:10px}.name{font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.meta{font-size:12px;color:var(--muted);margin-top:4px;min-height:32px}.price{margin-top:8px;font-weight:800}.buy{width:100%;margin-top:9px;padding:10px;border:0;border-radius:10px;background:var(--red);color:#fff;font-weight:900}.buy:disabled{opacity:.45}
+.status{padding:18px 12px;text-align:center;color:#aaa}
+@media(min-width:700px){.grid{grid-template-columns:repeat(4,minmax(0,1fr));max-width:1100px;margin:auto}header{max-width:1100px;margin:auto}}
+</style>
+</head>
+<body>
+<header>
+  <h1>WAIFU <span class="accent">NEXUS</span></h1>
+  <div class="balance">💰 Balance: <b id="balance">—</b></div>
+  <input id="search" placeholder="Search character, anime or ID…">
+  <div class="filters">
+    <select id="rarity"><option value="">All rarities</option></select>
+    <select id="edition"><option value="">All editions</option></select>
+  </div>
+</header>
+<div id="status" class="status">Loading shop…</div>
+<main id="grid" class="grid"></main>
+
+<script>
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+
+const state={chars:[],balance:0};
+const $=id=>document.getElementById(id);
+
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+
+function render(){
+ const q=$("search").value.trim().toLowerCase(), r=$("rarity").value, e=$("edition").value;
+ const list=state.chars.filter(c=>
+   (!q || [c.name,c.anime,c.id].some(v=>String(v??"").toLowerCase().includes(q))) &&
+   (!r || c.rarity===r) && (!e || c.edition===e)
+ );
+ $("status").textContent=list.length?"": "No characters found.";
+ $("grid").innerHTML=list.map(c=>{
+   const price=Number(c.price||0), can=state.balance>=price;
+   return `<article class="card">
+    <img src="${esc(c.img_url)}" loading="lazy" onerror="this.style.visibility='hidden'">
+    <div class="info">
+      <div class="name">${esc(c.name)}</div>
+      <div class="meta">${esc(c.rarity)}<br>${esc(c.anime)}${c.edition?" • "+esc(c.edition):""}</div>
+      <div class="price">💰 ${price.toLocaleString()}</div>
+      <button class="buy" ${can?"":"disabled"} onclick="buy('${esc(c.id)}',this)">BUY</button>
+    </div>
+   </article>`
+ }).join("");
+}
+
+async function load(){
+ try{
+   const r=await fetch("/api/shop/characters",{headers:{"X-Telegram-Init-Data":tg?.initData||""}});
+   const data=await r.json(); if(!r.ok) throw Error(data.error||"Failed");
+   state.chars=data.characters||[]; state.balance=Number(data.balance||0);
+   $("balance").textContent=state.balance.toLocaleString();
+   const rs=[...new Set(state.chars.map(c=>c.rarity).filter(Boolean))];
+   const es=[...new Set(state.chars.map(c=>c.edition).filter(Boolean))];
+   rs.forEach(x=>$("rarity").insertAdjacentHTML("beforeend",`<option>${esc(x)}</option>`));
+   es.forEach(x=>$("edition").insertAdjacentHTML("beforeend",`<option>${esc(x)}</option>`));
+   render();
+ }catch(e){$("status").textContent="❌ "+e.message}
+}
+
+async function buy(id,btn){
+ btn.disabled=true; btn.textContent="BUYING…";
+ try{
+   const r=await fetch("/api/shop/buy",{method:"POST",headers:{"Content-Type":"application/json","X-Telegram-Init-Data":tg?.initData||""},body:JSON.stringify({id})});
+   const data=await r.json(); if(!r.ok) throw Error(data.error||"Purchase failed");
+   state.balance=Number(data.balance); $("balance").textContent=state.balance.toLocaleString();
+   tg?.showPopup?.({title:"Purchase complete",message:`${data.name} added to your harem for ${Number(data.price).toLocaleString()} coins.`,buttons:[{type:"ok"}]});
+   render();
+ }catch(e){tg?.showAlert?.(e.message)||alert(e.message);btn.disabled=false;btn.textContent="BUY"}
+}
+["search","rarity","edition"].forEach(id=>$(id).addEventListener("input",render));
+load();
+</script>
+</body>
+</html>
+
