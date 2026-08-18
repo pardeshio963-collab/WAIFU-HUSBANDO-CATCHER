@@ -6,24 +6,31 @@ import asyncio
 import hashlib
 import hmac
 import importlib
+import io
 import json
 import os
 import threading
 import time
+import urllib.request
 from pathlib import Path
 from urllib.parse import parse_qsl
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, jsonify, request, send_file, send_from_directory
 
-from waifu import ALL_MODULES, LOGGER, TOKEN, collection, user_collection
-
+from waifu import (
+    ALL_MODULES,
+    LOGGER,
+    TOKEN,
+    application,
+    collection,
+    user_collection,
+)
 
 _web_app = Flask(__name__)
 _WEB_DIR = Path(__file__).resolve().parent / "web"
 
 # Flask runs in a separate thread, while Motor belongs to the bot's
-# asyncio event loop. Store the bot loop and submit DB coroutines to it
-# instead of creating a second event loop with asyncio.run().
+# asyncio event loop. All Motor operations are submitted to that loop.
 _BOT_LOOP = None
 
 
@@ -38,10 +45,6 @@ def _shop_page():
 
 
 def _validate_telegram_init_data(init_data: str):
-    """
-    Validate Telegram Mini App initData.
-    Returns the Telegram user dict on success, otherwise None.
-    """
     if not init_data:
         return None
 
@@ -70,7 +73,6 @@ def _validate_telegram_init_data(init_data: str):
         if not hmac.compare_digest(calculated_hash, received_hash):
             return None
 
-        # Reject stale initData (1 hour).
         auth_date = int(pairs.get("auth_date", "0"))
         if auth_date <= 0 or time.time() - auth_date > 3600:
             return None
@@ -111,16 +113,7 @@ def _price_for_character(char):
 
 
 def _run_on_bot_loop(coro):
-    """
-    Run an async Motor coroutine on the bot's existing asyncio loop.
-
-    The Flask server is in a separate thread. Creating a new loop here
-    breaks Motor because the AsyncIOMotorClient was created for the bot
-    loop. run_coroutine_threadsafe safely schedules the coroutine on the
-    already-running bot loop.
-    """
     if _BOT_LOOP is None or _BOT_LOOP.is_closed():
-        # Always close an unscheduled coroutine to avoid a warning.
         coro.close()
         raise RuntimeError("Bot event loop is not ready.")
 
@@ -135,6 +128,14 @@ async def _fetch_shop_data(user_id: int):
     async for c in collection.find({}):
         c = dict(c)
         c.pop("_id", None)
+
+        # MongoDB stores Telegram photo file_id values in img_url.
+        # A browser cannot display a Telegram file_id directly, so the
+        # Mini App receives our proxy endpoint instead.
+        char_id = str(c.get("id", ""))
+        if c.get("img_url"):
+            c["img_url"] = f"/api/shop/image/{char_id}"
+
         c["price"] = _price_for_character(c)
         chars.append(c)
 
@@ -148,7 +149,6 @@ async def _purchase_character(user_id: int, char_id: str):
 
     price = _price_for_character(char)
 
-    # Atomic balance check + deduction + harem insertion.
     result = await user_collection.update_one(
         {"id": user_id, "coins": {"$gte": price}},
         {
@@ -191,6 +191,56 @@ def _shop_characters():
     })
 
 
+@_web_app.get("/api/shop/image/<char_id>")
+def _shop_image(char_id):
+    """
+    Convert a Telegram photo file_id stored in MongoDB into an actual
+    image response that a browser/Telegram Mini App can display.
+
+    The bot's token is never exposed to the browser.
+    """
+    try:
+        char = _run_on_bot_loop(collection.find_one({"id": str(char_id)}))
+        if not char or not char.get("img_url"):
+            return "", 404
+
+        img_ref = str(char["img_url"])
+
+        # Support existing normal URLs too.
+        if img_ref.startswith(("http://", "https://")):
+            with urllib.request.urlopen(img_ref, timeout=15) as response:
+                data = response.read()
+                content_type = response.headers.get_content_type() or "image/jpeg"
+            return send_file(
+                io.BytesIO(data),
+                mimetype=content_type,
+                max_age=3600,
+            )
+
+        # Telegram file_id -> Telegram file path.
+        tg_file = _run_on_bot_loop(application.bot.get_file(img_ref))
+        file_path = getattr(tg_file, "file_path", None)
+        if not file_path:
+            LOGGER.error("Telegram returned no file_path for character %s", char_id)
+            return "", 404
+
+        telegram_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
+
+        with urllib.request.urlopen(telegram_url, timeout=20) as response:
+            data = response.read()
+            content_type = response.headers.get_content_type() or "image/jpeg"
+
+        return send_file(
+            io.BytesIO(data),
+            mimetype=content_type,
+            max_age=3600,
+        )
+
+    except Exception as exc:
+        LOGGER.error("Shop image failed for %s: %s", char_id, exc, exc_info=True)
+        return "", 404
+
+
 @_web_app.post("/api/shop/buy")
 def _shop_buy():
     tg_user = _mini_app_user()
@@ -225,11 +275,13 @@ def _run_web_server() -> None:
 def _start_web_server() -> None:
     thread = threading.Thread(target=_run_web_server, daemon=True)
     thread.start()
-    LOGGER.info("Web server started on port %s.", os.environ.get("PORT", "10000"))
+    LOGGER.info(
+        "Web server started on port %s.",
+        os.environ.get("PORT", "10000"),
+    )
 
 
 async def _migrate_indexes() -> None:
-    from waifu import user_collection
     try:
         await user_collection.drop_index("user_id_1")
         LOGGER.info("Migration: dropped stale index users.user_id_1")
@@ -237,13 +289,14 @@ async def _migrate_indexes() -> None:
         pass
 
 
-async def _post_init(application) -> None:
+async def _post_init(application_instance) -> None:
     global _BOT_LOOP
 
-    # This is the same asyncio loop Motor is used from by the bot.
+    # This is the same asyncio loop Motor is using.
     _BOT_LOOP = asyncio.get_running_loop()
 
     from waifu.modules.inlinequery import create_indexes
+
     await _migrate_indexes()
     await create_indexes()
     LOGGER.info("DB indexes ensured.")
@@ -260,9 +313,9 @@ def main() -> None:
         except Exception as exc:
             LOGGER.error("  ✗ %s — %s", name, exc, exc_info=True)
             raise
+
     LOGGER.info("All modules loaded.")
 
-    from waifu import application
     application.post_init = _post_init
 
     LOGGER.info("Starting bot (polling)…")
