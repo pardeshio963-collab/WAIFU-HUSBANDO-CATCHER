@@ -1,36 +1,33 @@
 """
-waifu/__main__.py — Entry point.
-Run with: python -m waifu
+waifu/__main__.py — Entry point with a Telegram-file image proxy.
+
+Important:
+MongoDB stores Telegram photo file_ids. The Mini App cannot render a
+file_id directly. This version resolves the file_id to a Telegram file
+URL, then redirects the browser to that image URL.
+
+This avoids downloading the image through Render, which was timing out.
 """
+
 import asyncio
 import hashlib
 import hmac
 import importlib
-import io
 import json
 import os
 import threading
 import time
-import urllib.request
 from pathlib import Path
 from urllib.parse import parse_qsl
 
-from flask import Flask, jsonify, request, send_file, send_from_directory
+import httpx
+from flask import Flask, jsonify, request, redirect, send_from_directory
 
-from waifu import (
-    ALL_MODULES,
-    LOGGER,
-    TOKEN,
-    application,
-    collection,
-    user_collection,
-)
+from waifu import ALL_MODULES, LOGGER, TOKEN, application, collection, user_collection
 
 _web_app = Flask(__name__)
 _WEB_DIR = Path(__file__).resolve().parent / "web"
 
-# Flask runs in a separate thread, while Motor belongs to the bot's
-# asyncio event loop. All Motor operations are submitted to that loop.
 _BOT_LOOP = None
 
 
@@ -87,8 +84,9 @@ def _validate_telegram_init_data(init_data: str):
 
 
 def _mini_app_user():
-    init_data = request.headers.get("X-Telegram-Init-Data", "")
-    return _validate_telegram_init_data(init_data)
+    return _validate_telegram_init_data(
+        request.headers.get("X-Telegram-Init-Data", "")
+    )
 
 
 def _price_for_character(char):
@@ -118,7 +116,7 @@ def _run_on_bot_loop(coro):
         raise RuntimeError("Bot event loop is not ready.")
 
     future = asyncio.run_coroutine_threadsafe(coro, _BOT_LOOP)
-    return future.result(timeout=30)
+    return future.result(timeout=45)
 
 
 async def _fetch_shop_data(user_id: int):
@@ -129,12 +127,8 @@ async def _fetch_shop_data(user_id: int):
         c = dict(c)
         c.pop("_id", None)
 
-        # MongoDB stores Telegram photo file_id values in img_url.
-        # A browser cannot display a Telegram file_id directly, so the
-        # Mini App receives our proxy endpoint instead.
-        char_id = str(c.get("id", ""))
         if c.get("img_url"):
-            c["img_url"] = f"/api/shop/image/{char_id}"
+            c["img_url"] = f"/api/shop/image/{c.get('id', '')}"
 
         c["price"] = _price_for_character(c)
         chars.append(c)
@@ -179,8 +173,9 @@ def _shop_characters():
         return jsonify({"error": "Invalid or expired Telegram session."}), 401
 
     try:
-        user_id = int(tg_user["id"])
-        doc, chars = _run_on_bot_loop(_fetch_shop_data(user_id))
+        doc, chars = _run_on_bot_loop(
+            _fetch_shop_data(int(tg_user["id"]))
+        )
     except Exception as exc:
         LOGGER.error("Shop character API failed: %s", exc, exc_info=True)
         return jsonify({"error": "Database error."}), 500
@@ -191,56 +186,75 @@ def _shop_characters():
     })
 
 
+async def _telegram_file_path(file_id: str):
+    """
+    Resolve file_id to Telegram's CDN file_path.
+    Uses a short explicit timeout and a couple of retries.
+    """
+    url = f"https://api.telegram.org/bot{TOKEN}/getFile"
+    timeout = httpx.Timeout(12.0, connect=8.0)
+
+    last_error = None
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        for attempt in range(2):
+            try:
+                response = await client.get(
+                    url,
+                    params={"file_id": file_id},
+                )
+                response.raise_for_status()
+                payload = response.json()
+
+                if payload.get("ok") and payload.get("result", {}).get("file_path"):
+                    return payload["result"]["file_path"]
+
+                raise RuntimeError(f"Telegram getFile failed: {payload}")
+            except Exception as exc:
+                last_error = exc
+                if attempt == 0:
+                    await asyncio.sleep(0.5)
+
+    raise last_error
+
+
 @_web_app.get("/api/shop/image/<char_id>")
 def _shop_image(char_id):
     """
-    Convert a Telegram photo file_id stored in MongoDB into an actual
-    image response that a browser/Telegram Mini App can display.
-
-    The bot's token is never exposed to the browser.
+    Resolve Telegram file_id and redirect the Mini App to Telegram's
+    file CDN. Render no longer downloads the image itself, so the
+    previous Render -> Telegram download timeout is avoided.
     """
     try:
-        async def _get_character():
-            return await collection.find_one({"id": str(char_id)})
+        char = _run_on_bot_loop(
+            collection.find_one({"id": str(char_id)})
+        )
 
-        char = _run_on_bot_loop(_get_character())
         if not char or not char.get("img_url"):
             return "", 404
 
         img_ref = str(char["img_url"])
 
-        # Support existing normal URLs too.
+        # Existing normal URLs are passed through unchanged.
         if img_ref.startswith(("http://", "https://")):
-            with urllib.request.urlopen(img_ref, timeout=15) as response:
-                data = response.read()
-                content_type = response.headers.get_content_type() or "image/jpeg"
-            return send_file(
-                io.BytesIO(data),
-                mimetype=content_type,
-                max_age=3600,
-            )
+            return redirect(img_ref, code=302)
 
-        # Telegram file_id -> Telegram file path.
-        tg_file = _run_on_bot_loop(application.bot.get_file(img_ref))
-        file_path = getattr(tg_file, "file_path", None)
-        if not file_path:
-            LOGGER.error("Telegram returned no file_path for character %s", char_id)
-            return "", 404
+        file_path = _run_on_bot_loop(
+            _telegram_file_path(img_ref)
+        )
 
         telegram_url = f"https://api.telegram.org/file/bot{TOKEN}/{file_path}"
 
-        with urllib.request.urlopen(telegram_url, timeout=20) as response:
-            data = response.read()
-            content_type = response.headers.get_content_type() or "image/jpeg"
-
-        return send_file(
-            io.BytesIO(data),
-            mimetype=content_type,
-            max_age=3600,
-        )
+        # The browser receives the redirect; Render does not download
+        # the image bytes.
+        return redirect(telegram_url, code=302)
 
     except Exception as exc:
-        LOGGER.error("Shop image failed for %s: %s", char_id, exc, exc_info=True)
+        LOGGER.error(
+            "Shop image failed for %s: %s",
+            char_id,
+            exc,
+            exc_info=True,
+        )
         return "", 404
 
 
@@ -256,9 +270,8 @@ def _shop_buy():
         return jsonify({"error": "Character ID is required."}), 400
 
     try:
-        user_id = int(tg_user["id"])
         result, error = _run_on_bot_loop(
-            _purchase_character(user_id, char_id)
+            _purchase_character(int(tg_user["id"]), char_id)
         )
     except Exception as exc:
         LOGGER.error("Shop purchase failed: %s", exc, exc_info=True)
@@ -270,32 +283,27 @@ def _shop_buy():
     return jsonify(result), 200
 
 
-def _run_web_server() -> None:
+def _run_web_server():
     port = int(os.environ.get("PORT", 10000))
     _web_app.run(host="0.0.0.0", port=port, use_reloader=False)
 
 
-def _start_web_server() -> None:
-    thread = threading.Thread(target=_run_web_server, daemon=True)
-    thread.start()
-    LOGGER.info(
-        "Web server started on port %s.",
-        os.environ.get("PORT", "10000"),
-    )
+def _start_web_server():
+    threading.Thread(
+        target=_run_web_server,
+        daemon=True,
+    ).start()
 
 
-async def _migrate_indexes() -> None:
+async def _migrate_indexes():
     try:
         await user_collection.drop_index("user_id_1")
-        LOGGER.info("Migration: dropped stale index users.user_id_1")
     except Exception:
         pass
 
 
-async def _post_init(application_instance) -> None:
+async def _post_init(application_instance):
     global _BOT_LOOP
-
-    # This is the same asyncio loop Motor is using.
     _BOT_LOOP = asyncio.get_running_loop()
 
     from waifu.modules.inlinequery import create_indexes
@@ -305,10 +313,11 @@ async def _post_init(application_instance) -> None:
     LOGGER.info("DB indexes ensured.")
 
 
-def main() -> None:
+def main():
     _start_web_server()
 
     LOGGER.info("Loading %d module(s)…", len(ALL_MODULES))
+
     for name in ALL_MODULES:
         try:
             importlib.import_module(f"waifu.modules.{name}")
@@ -316,8 +325,6 @@ def main() -> None:
         except Exception as exc:
             LOGGER.error("  ✗ %s — %s", name, exc, exc_info=True)
             raise
-
-    LOGGER.info("All modules loaded.")
 
     application.post_init = _post_init
 
