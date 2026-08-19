@@ -619,4 +619,25 @@ async def update_char(upd: Update, context: CallbackContext) -> None:
                 parse_mode=ParseMode.HTML,
             )
 
-            aw
+            except Exception as e:
+        await upd.message.reply_text(
+            f"⚠️ DB updated but channel sync failed: {e}",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    await upd.message.reply_text(
+        f"✅ <b>{char['name']}</b> — <code>{field}</code> updated.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+# ── Command handlers ───────────────────────────────────────────────────────────
+
+application.add_handler(CommandHandler("upload", upload, block=False))
+application.add_handler(CommandHandler("uploadw", uploadw, block=False))
+application.add_handler(CommandHandler("uploadchar", uploadchar, block=False))
+application.add_handler(CommandHandler("rarities", rarities, block=False))
+application.add_handler(CommandHandler("editions", editions, block=False))
+application.add_handler(CommandHandler("delete", delete, block=False))
+application.add_handler(CommandHandler("update", update_char, block=False))
