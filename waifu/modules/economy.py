@@ -14,6 +14,7 @@ from telegram.ext import CallbackContext, CallbackQueryHandler, CommandHandler
 
 from waifu import application, user_collection, market_collection, collection
 from waifu.config import Config
+import re
 
 _DAILY_COOLDOWN = 86_400   # 24 hours in seconds
 _WEEKLY_COOLDOWN = 604_800  # 7 days in seconds
@@ -78,6 +79,87 @@ async def daily(update: Update, context: CallbackContext) -> None:
         f"🎁 <b>Daily reward!</b>\n\n"
         f"You received <b>{reward:,} coins</b> 🪙\n"
         f"Current balance: <b>{doc.get('coins', 0) + reward:,}</b>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+# ── /pay ──────────────────────────────────────────────────────────────────────
+
+async def pay(update: Update, context: CallbackContext) -> None:
+    sender = update.effective_user
+
+    # Accept /pay 100 when replying to the recipient, or /pay @username 100.
+    target = None
+    amount_text = None
+
+    if update.message.reply_to_message:
+        target = update.message.reply_to_message.from_user
+        if context.args:
+            amount_text = context.args[0]
+    elif len(context.args) >= 2:
+        username = context.args[0].lstrip("@")
+        amount_text = context.args[1]
+
+        target = await _find_user_by_username(username)
+        if target is None:
+            await update.message.reply_text(
+                "❌ User not found. Use the command by replying to their message instead."
+            )
+            return
+
+    if target is None or amount_text is None:
+        await update.message.reply_text(
+            "Usage:\n"
+            "• Reply to a user's message: <code>/pay 100</code>\n"
+            "• By username: <code>/pay @username 100</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if target.id == sender.id:
+        await update.message.reply_text("❌ You can't pay yourself.")
+        return
+
+    try:
+        amount = int(amount_text)
+    except (TypeError, ValueError):
+        await update.message.reply_text("❌ Amount must be a whole number.")
+        return
+
+    if amount <= 0:
+        await update.message.reply_text("❌ Amount must be greater than 0.")
+        return
+
+    sender_doc = await _ensure_user(sender.id, sender)
+    if sender_doc.get("coins", 0) < amount:
+        await update.message.reply_text(
+            f"❌ You don't have enough coins.\n"
+            f"Your balance: <b>{sender_doc.get('coins', 0):,}</b> 🪙",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    receiver = await _ensure_user(target.id, target)
+
+    # Atomic sender deduction prevents overspending if two payments arrive together.
+    result = await user_collection.update_one(
+        {"id": sender.id, "coins": {"$gte": amount}},
+        {"$inc": {"coins": -amount}},
+    )
+    if result.modified_count != 1:
+        await update.message.reply_text("❌ Payment failed. Please try again.")
+        return
+
+    await user_collection.update_one(
+        {"id": target.id},
+        {"$inc": {"coins": amount}},
+    )
+
+    await update.message.reply_text(
+        f"✅ <b>Payment successful!</b>\n\n"
+        f"👤 To: <b>{escape(target.first_name or target.username or str(target.id))}</b>\n"
+        f"🪙 Amount: <b>{amount:,}</b> coins\n"
+        f"💰 Your balance: <b>{sender_doc.get('coins', 0) - amount:,}</b> coins",
         parse_mode=ParseMode.HTML,
     )
 
@@ -520,14 +602,4 @@ async def check(update: Update, context: CallbackContext) -> None:
 
 application.add_handler(CommandHandler("balance", balance, block=False))
 application.add_handler(CommandHandler("check",    check,    block=False))
-application.add_handler(CommandHandler("daily",   daily,   block=False))
-application.add_handler(CommandHandler("weekly",  weekly,  block=False))
-application.add_handler(CommandHandler("claim",   claim,   block=False))
-application.add_handler(CommandHandler("sell",    sell,    block=False))
-application.add_handler(CommandHandler("market",  market,  block=False))
-application.add_handler(CommandHandler("buy",     buy,     block=False))
-application.add_handler(CommandHandler("delist",  delist,  block=False))
-application.add_handler(CallbackQueryHandler(market_page_cb, pattern=r"^market:\d+$", block=False))
-
-
-    
+application.add_handler(CommandHandler("daily",   daily,   bloc
