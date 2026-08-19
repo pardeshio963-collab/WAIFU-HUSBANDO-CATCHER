@@ -286,6 +286,13 @@ async def claim(update: Update, context: CallbackContext) -> None:
         if isinstance(last_claim, str):
             last_claim = datetime.fromisoformat(last_claim)
 
+        # Normalize legacy naive timestamps to UTC-aware datetimes.
+        # This prevents: "can't compare offset-naive and offset-aware datetimes".
+        if last_claim.tzinfo is None:
+            last_claim = last_claim.replace(tzinfo=timezone.utc)
+        else:
+            last_claim = last_claim.astimezone(timezone.utc)
+
         next_claim = last_claim + timedelta(hours=24)
 
         if now < next_claim:
@@ -484,5 +491,6 @@ application.add_handler(CommandHandler("market",  market,  block=False))
 application.add_handler(CommandHandler("buy",     buy,     block=False))
 application.add_handler(CommandHandler("delist",  delist,  block=False))
 application.add_handler(CallbackQueryHandler(market_page_cb, pattern=r"^market:\d+$", block=False))
+
 
     
