@@ -16,6 +16,8 @@ from waifu import application, user_collection, market_collection, collection
 from waifu.config import Config
 
 _DAILY_COOLDOWN = 86_400   # 24 hours in seconds
+_WEEKLY_COOLDOWN = 604_800  # 7 days in seconds
+_WEEKLY_REWARD = 500
 _PAGE = 8
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -76,6 +78,40 @@ async def daily(update: Update, context: CallbackContext) -> None:
         f"🎁 <b>Daily reward!</b>\n\n"
         f"You received <b>{reward:,} coins</b> 🪙\n"
         f"Current balance: <b>{doc.get('coins', 0) + reward:,}</b>",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+# ── /weekly ───────────────────────────────────────────────────────────────────
+
+async def weekly(update: Update, context: CallbackContext) -> None:
+    u = update.effective_user
+    doc = await _ensure_user(u.id, u)
+    now = time.time()
+    last = doc.get("last_weekly", 0)
+
+    if now - last < _WEEKLY_COOLDOWN:
+        remaining = int(_WEEKLY_COOLDOWN - (now - last))
+        await update.message.reply_text(
+            f"⏳ <b>Weekly reward already claimed!</b>\n"
+            f"Come back in <b>{_fmt_time(remaining)}</b>.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    reward = _WEEKLY_REWARD
+    new_balance = doc.get("coins", 0) + reward
+
+    await user_collection.update_one(
+        {"id": u.id},
+        {"$inc": {"coins": reward}, "$set": {"last_weekly": now}},
+    )
+
+    await update.message.reply_text(
+        f"🎁 <b>Weekly reward!</b>\n\n"
+        f"You received <b>{reward:,} coins</b> 🪙\n"
+        f"Current balance: <b>{new_balance:,}</b>\n\n"
+        f"⏰ Next weekly reward in <b>7 days</b>.",
         parse_mode=ParseMode.HTML,
     )
 
@@ -485,6 +521,7 @@ async def check(update: Update, context: CallbackContext) -> None:
 application.add_handler(CommandHandler("balance", balance, block=False))
 application.add_handler(CommandHandler("check",    check,    block=False))
 application.add_handler(CommandHandler("daily",   daily,   block=False))
+application.add_handler(CommandHandler("weekly",  weekly,  block=False))
 application.add_handler(CommandHandler("claim",   claim,   block=False))
 application.add_handler(CommandHandler("sell",    sell,    block=False))
 application.add_handler(CommandHandler("market",  market,  block=False))
