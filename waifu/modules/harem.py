@@ -12,7 +12,7 @@ from telegram.constants import ParseMode
 from telegram.error import BadRequest
 from telegram.ext import CallbackContext, CallbackQueryHandler, CommandHandler
 
-from waifu import application, user_collection, waifu_collection, sudo_users
+from waifu import application, user_collection, waifu_collection, sudo_users, OWNER_ID
 from waifu.config import Config
 
 
@@ -499,8 +499,101 @@ async def wmode_callback(update: Update, context: CallbackContext) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# /reset <user_id> — OWNER ONLY
+# Clears only the target user's harem.
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def reset_harem(update: Update, context: CallbackContext) -> None:
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("❌ Owner only.")
+        return
+
+    if len(context.args) != 1:
+        await update.message.reply_text(
+            "Usage: <code>/reset &lt;user_id&gt;</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Invalid user ID.")
+        return
+
+    result = await user_collection.update_one(
+        {"id": target_id},
+        {"$set": {"characters": []}},
+    )
+
+    if result.matched_count == 0:
+        await update.message.reply_text("❌ User not found.")
+        return
+
+    await update.message.reply_text(
+        f"✅ Harem reset for <code>{target_id}</code>.",
+        parse_mode=ParseMode.HTML,
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /kill <char_id> — OWNER ONLY
+# Reply to a user's message and remove that character from their harem.
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def kill_character(update: Update, context: CallbackContext) -> None:
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("❌ Owner only.")
+        return
+
+    if not update.message.reply_to_message:
+        await update.message.reply_text(
+            "❌ Reply to the user's message.\n"
+            "Usage: <code>/kill &lt;char_id&gt;</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    if len(context.args) != 1:
+        await update.message.reply_text(
+            "Usage: <code>/kill &lt;char_id&gt;</code>",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    char_id = context.args[0].strip()
+    target_user = update.message.reply_to_message.from_user
+
+    result = await user_collection.update_one(
+        {
+            "id": target_user.id,
+            "characters": {"$elemMatch": {"id": char_id}},
+        },
+        {
+            "$pull": {"characters": {"id": char_id}},
+        },
+    )
+
+    if result.matched_count == 0:
+        await update.message.reply_text(
+            f"❌ Character <code>{escape(char_id)}</code> "
+            f"not found in {escape(target_user.first_name or str(target_user.id))}'s harem.",
+            parse_mode=ParseMode.HTML,
+        )
+        return
+
+    await update.message.reply_text(
+        f"✅ Character <code>{escape(char_id)}</code> removed from "
+        f"<b>{escape(target_user.first_name or str(target_user.id))}</b>'s harem.",
+        parse_mode=ParseMode.HTML,
+    )
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Handlers
 # ─────────────────────────────────────────────────────────────────────────────
+
+application.add_handler(CommandHandler("reset", reset_harem, block=False))
+application.add_handler(CommandHandler("kill", kill_character, block=False))
 
 application.add_handler(
     CommandHandler(["harem", "collection"], harem, block=False)
@@ -526,3 +619,4 @@ application.add_handler(
 application.add_handler(CommandHandler("w", w_character, block=False))
 application.add_handler(CommandHandler("wrarity", wrarity, block=False))
 application.add_handler(CommandHandler("wmode", wmode, block=False))
+            
