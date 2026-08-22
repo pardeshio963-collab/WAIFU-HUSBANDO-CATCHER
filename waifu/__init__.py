@@ -29,8 +29,10 @@ from waifu.config import Config
 TOKEN            = Config.TOKEN
 BOT_USERNAME     = Config.BOT_USERNAME
 OWNER_ID: int    = Config.OWNER_ID
+# Sudo list is kept in memory and synced with MongoDB at startup.
+# OWNER_ID is always sudo and cannot be removed.
 sudo_users: set[int] = Config.all_sudo()
-DEV_LIST: set[int] = {OWNER_ID}   # eval/developer access is owner-only
+DEV_LIST: set[int] = {OWNER_ID}   # eval.py is owner-only
 GROUP_ID         = Config.GROUP_ID
 CHARA_CHANNEL_ID = Config.CHARA_CHANNEL_ID
 PHOTO_URL        = Config.PHOTO_URL
@@ -50,6 +52,7 @@ top_global_groups_collection = db["top_groups"]
 pm_users                     = db["pm_users"]
 market_collection            = db["market_listings"]
 active_drops_collection      = db["active_drops"]
+sudo_collection              = db["sudo_users"]
 waifu_collection             = collection
 
 from telegram.ext import Application
@@ -93,5 +96,5 @@ __all__ = [
     "GROUP_ID", "CHARA_CHANNEL_ID", "PHOTO_URL", "SUPPORT_CHAT", "UPDATE_CHAT",
     "collection", "user_collection", "user_totals_collection",
     "group_user_totals_collection", "top_global_groups_collection",
-    "pm_users", "market_collection", "active_drops_collection", "waifu_collection",
+    "pm_users", "market_collection", "active_drops_collection", "sudo_collection", "waifu_collection",
 ]
