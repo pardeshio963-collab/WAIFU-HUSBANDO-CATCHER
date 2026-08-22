@@ -23,7 +23,10 @@ from urllib.parse import parse_qsl
 import httpx
 from flask import Flask, jsonify, request, redirect, send_from_directory
 
-from waifu import ALL_MODULES, LOGGER, TOKEN, application, collection, user_collection
+from waifu import (
+    ALL_MODULES, LOGGER, TOKEN, application, collection, user_collection,
+    Config, OWNER_ID, sudo_users, DEV_LIST, sudo_collection,
+)
 
 _web_app = Flask(__name__)
 _WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -311,6 +314,37 @@ async def _migrate_indexes():
         pass
 
 
+async def _sync_sudo_users():
+    """Load sudo users from MongoDB, preserving existing SUDO_IDS on first run."""
+    await sudo_collection.create_index("user_id", unique=True)
+
+    # Seed database with the sudo IDs currently configured in the environment.
+    # This makes migration safe: existing sudo users are not lost.
+    env_sudos = set(Config.sudo_users)
+    if env_sudos:
+        await sudo_collection.bulk_write([
+            __import__("pymongo").UpdateOne(
+                {"user_id": int(uid)},
+                {"$setOnInsert": {"user_id": int(uid)}},
+                upsert=True,
+            )
+            for uid in env_sudos
+        ])
+
+    stored = {
+        int(doc["user_id"])
+        async for doc in sudo_collection.find({}, {"user_id": 1})
+        if str(doc.get("user_id", "")).lstrip("-").isdigit()
+    }
+
+    sudo_users.clear()
+    sudo_users.update({OWNER_ID, *stored})
+    DEV_LIST.clear()
+    DEV_LIST.add(OWNER_ID)
+
+    LOGGER.info("Dynamic sudo list loaded: %d sudo user(s).", len(sudo_users) - 1)
+
+
 async def _post_init(application_instance):
     global _BOT_LOOP
     _BOT_LOOP = asyncio.get_running_loop()
@@ -319,6 +353,7 @@ async def _post_init(application_instance):
 
     await _migrate_indexes()
     await create_indexes()
+    await _sync_sudo_users()
     LOGGER.info("DB indexes ensured.")
 
 
@@ -343,4 +378,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
     
