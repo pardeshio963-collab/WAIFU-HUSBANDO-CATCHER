@@ -25,7 +25,7 @@ redeem_collection = db["redeem_codes"]
 
 
 def _is_admin(user_id: int) -> bool:
-    return user_id in Config.all_sudo()
+    return user_id == Config.OWNER_ID
 
 
 def _normalize_code(value: str) -> str:
@@ -401,4 +401,5 @@ application.add_handler(
         redeem_char,
         block=False,
     )
-)
+      )
+  
